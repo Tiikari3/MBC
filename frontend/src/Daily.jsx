@@ -86,6 +86,12 @@ export default function Daily({
   const [isUpdatingSong, setIsUpdatingSong] =
     useState(false);
 
+  const [isDeletingSong, setIsDeletingSong] =
+    useState(false);
+
+  const [confirmingDelete, setConfirmingDelete] =
+    useState(false);
+
   const handleUnauthorized = useCallback(() => {
     localStorage.removeItem('moosic_token');
     localStorage.removeItem('moosic_user');
@@ -622,6 +628,73 @@ export default function Daily({
       }
     };
 
+  const handleDeleteSong = async () => {
+    if (!mySong) {
+      return;
+    }
+
+    const token =
+      localStorage.getItem('moosic_token');
+
+    if (!token) {
+      handleUnauthorized();
+      return;
+    }
+
+    setIsDeletingSong(true);
+    setSubmitStatus(null);
+
+    try {
+      const response = await fetch(
+        `${import.meta.env.VITE_API_URL}/api/songs/${mySong.id}`,
+        {
+          method: 'DELETE',
+          headers: {
+            Authorization:
+              `Bearer ${token}`
+          }
+        }
+      );
+
+      if (response.status === 401) {
+        handleUnauthorized();
+        return;
+      }
+
+      const data =
+        await response.json().catch(
+          () => ({})
+        );
+
+      if (!response.ok) {
+        setSubmitStatus(
+          data.detail ||
+            'Failed to delete song.'
+        );
+        return;
+      }
+
+      setConfirmingDelete(false);
+      setEditingSong(null);
+      setEditSpotifyUrl('');
+      setEditPreviewData(null);
+
+      setSubmitStatus(
+        'Success! Your song was deleted.'
+      );
+
+      await fetchDataForDate();
+    } catch (error) {
+      console.error(error);
+
+      setSubmitStatus(
+        'Error deleting song.'
+      );
+    } finally {
+      setIsDeletingSong(false);
+    }
+  };  
+
   const handleScoreClick =
     (songId, score) => {
       if (!currentUser) {
@@ -1049,31 +1122,153 @@ export default function Daily({
                 )}
               </div>
 
-              <button
-                onClick={() =>
-                  startEditingSong(
-                    mySong
-                  )
-                }
-                style={{
-                  background:
-                    'transparent',
-                  color:
-                    'var(--accent-green)',
-                  border:
-                    '1px solid var(--accent-green)',
-                  padding:
-                    '0.6rem 1rem',
-                  borderRadius:
-                    '8px',
-                  fontWeight:
-                    'bold',
-                  cursor:
-                    'pointer'
-                }}
-              >
-                Edit My Song
-              </button>
+              <div
+  style={{
+    display: 'flex',
+    gap: '0.6rem',
+    alignItems: 'center',
+    flexWrap: 'wrap',
+    justifyContent: 'flex-end'
+  }}
+>
+  {!confirmingDelete ? (
+    <>
+      <button
+        onClick={() =>
+          startEditingSong(mySong)
+        }
+        style={{
+          background:
+            'transparent',
+          color:
+            'var(--accent-green)',
+          border:
+            '1px solid var(--accent-green)',
+          padding:
+            '0.6rem 1rem',
+          borderRadius:
+            '8px',
+          fontWeight:
+            'bold',
+          cursor:
+            'pointer'
+        }}
+      >
+        Edit My Song
+      </button>
+
+      <button
+        onClick={() =>
+          setConfirmingDelete(true)
+        }
+        style={{
+          background:
+            'transparent',
+          color:
+            '#ff6b6b',
+          border:
+            '1px solid rgba(255,107,107,0.55)',
+          padding:
+            '0.6rem 1rem',
+          borderRadius:
+            '8px',
+          fontWeight:
+            'bold',
+          cursor:
+            'pointer'
+        }}
+      >
+        Delete Song
+      </button>
+    </>
+  ) : (
+    <div
+      style={{
+        display: 'flex',
+        flexDirection: 'column',
+        alignItems: 'flex-end',
+        gap: '0.65rem'
+      }}
+    >
+      <div
+        style={{
+          color: '#ff8f8f',
+          fontSize: '0.85rem',
+          textAlign: 'right',
+          maxWidth: '300px'
+        }}
+      >
+        Delete your submission for this day?
+        This will also remove its votes.
+      </div>
+
+      <div
+        style={{
+          display: 'flex',
+          gap: '0.6rem'
+        }}
+      >
+        <button
+          onClick={() =>
+            setConfirmingDelete(false)
+          }
+          disabled={isDeletingSong}
+          style={{
+            background:
+              'transparent',
+            color:
+              'var(--text-muted)',
+            border:
+              '1px solid var(--border-color)',
+            padding:
+              '0.6rem 1rem',
+            borderRadius:
+              '8px',
+            fontWeight:
+              'bold',
+            cursor:
+              isDeletingSong
+                ? 'not-allowed'
+                : 'pointer'
+          }}
+        >
+          Cancel
+        </button>
+
+        <button
+          onClick={handleDeleteSong}
+          disabled={isDeletingSong}
+          style={{
+            background:
+              '#ff6b6b',
+            color:
+              '#111',
+            border:
+              'none',
+            padding:
+              '0.6rem 1rem',
+            borderRadius:
+              '8px',
+            fontWeight:
+              'bold',
+            cursor:
+              isDeletingSong
+                ? 'not-allowed'
+                : 'pointer',
+            opacity:
+              isDeletingSong
+                ? 0.6
+                : 1
+          }}
+        >
+          {isDeletingSong
+            ? 'Deleting…'
+            : 'Delete Song'}
+        </button>
+      </div>
+    </div>
+  )}
+</div>
             </div>
           ) : (
             <>
