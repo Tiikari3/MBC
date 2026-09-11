@@ -61,6 +61,8 @@ const getNextThursday = () => {
   return toDateString(next);
 };
 
+const ROTATION_START_DATE = '2026-09-17';
+
 const getThursdayDates = (count = 12) => {
   const first = parseLocalDate(
     getNextThursday()
@@ -76,6 +78,30 @@ const getThursdayDates = (count = 12) => {
       return toDateString(next);
     }
   );
+};
+
+const getAllThursdayDates = (futureCount = 12) => {
+  const start = parseLocalDate(ROTATION_START_DATE);
+  const futureDates = getThursdayDates(futureCount);
+  const futureEnd = parseLocalDate(
+    futureDates[futureDates.length - 1]
+  );
+
+  const dates = [];
+  const cursor = new Date(start);
+
+  while (cursor <= futureEnd) {
+    dates.push(toDateString(cursor));
+    cursor.setDate(cursor.getDate() + 7);
+  }
+
+  futureDates.forEach((dateValue) => {
+    if (!dates.includes(dateValue)) {
+      dates.push(dateValue);
+    }
+  });
+
+  return dates.sort();
 };
 
 const statusMeta = {
@@ -200,6 +226,7 @@ function ThemeCard({
   onSkip,
   busyDate,
   editingDate,
+  isPast,
   setEditingDate,
   editName,
   setEditName,
@@ -214,6 +241,7 @@ function ThemeCard({
     Number(currentUser.id) ===
       Number(theme.proposer_id);
   const canEdit =
+    !isPast &&
     isProposer &&
     theme.status === 'pending';
   const hasTheme =
@@ -551,7 +579,8 @@ function ThemeCard({
               </div>
             )}
 
-          {theme.status === 'pending' &&
+          {!isPast &&
+            theme.status === 'pending' &&
             hasTheme &&
             currentUser && (
               <div
@@ -768,6 +797,7 @@ function ThemeCard({
       )}
 
       {currentUser &&
+        !isPast &&
         !isEditing &&
         theme.status === 'pending' && (
           <div
@@ -827,6 +857,7 @@ function ThemeCard({
         )}
 
       {currentUser &&
+        !isPast &&
         theme.status === 'skipped' && (
           <div
             style={{
@@ -875,6 +906,21 @@ function ThemeCard({
             </button>
           </div>
         )}
+
+      {isPast && (
+        <div
+          style={{
+            marginTop: '1rem',
+            paddingTop: '1rem',
+            borderTop:
+              '1px solid var(--border-color)',
+            color: 'var(--text-muted)',
+            fontSize: '0.78rem'
+          }}
+        >
+          Historical theme · view only
+        </div>
+      )}
     </article>
   );
 }
@@ -884,11 +930,11 @@ export default function ThursdayThemes({
   onGoToLogin
 }) {
   const dates = useMemo(
-    () => getThursdayDates(12),
+    () => getAllThursdayDates(12),
     []
   );
 
-  const startDate = dates[0];
+  const startDate = ROTATION_START_DATE;
   const endDate = dates[dates.length - 1];
 
   const [themes, setThemes] = useState([]);
@@ -904,6 +950,24 @@ export default function ThursdayThemes({
     useState('');
   const [editDescription, setEditDescription] =
     useState('');
+
+  const todayString = getTodayString();
+
+  const pastThemes = themes
+    .filter(
+      (theme) =>
+        theme.date < todayString &&
+        (theme.exists || theme.status === 'skipped')
+    )
+    .sort((a, b) =>
+      b.date.localeCompare(a.date)
+    );
+
+  const upcomingThemes = themes
+    .filter((theme) => theme.date >= todayString)
+    .sort((a, b) =>
+      a.date.localeCompare(b.date)
+    );
 
   const fetchThemes = async () => {
     setIsLoading(true);
@@ -1401,34 +1465,164 @@ export default function ThursdayThemes({
           style={{
             display: 'flex',
             flexDirection: 'column',
-            gap: '1rem'
+            gap: '2rem'
           }}
         >
-          {themes.map((theme) => (
-            <ThemeCard
-              key={theme.date}
-              theme={theme}
-              currentUser={currentUser}
-              onSaveTheme={
-                handleSaveTheme
-              }
-              onVote={handleVote}
-              onSkip={handleSkip}
-              busyDate={busyDate}
-              editingDate={editingDate}
-              setEditingDate={
-                setEditingDate
-              }
-              editName={editName}
-              setEditName={setEditName}
-              editDescription={
-                editDescription
-              }
-              setEditDescription={
-                setEditDescription
-              }
-            />
-          ))}
+          <section>
+            <div
+              style={{
+                display: 'flex',
+                justifyContent: 'space-between',
+                alignItems: 'flex-end',
+                gap: '1rem',
+                flexWrap: 'wrap',
+                marginBottom: '0.9rem'
+              }}
+            >
+              <div>
+                <div
+                  style={{
+                    color: 'var(--accent-green)',
+                    fontSize: '0.72rem',
+                    textTransform: 'uppercase',
+                    letterSpacing: '0.1em',
+                    fontWeight: '800',
+                    marginBottom: '0.2rem'
+                  }}
+                >
+                  Coming up
+                </div>
+                <h2
+                  style={{
+                    margin: 0,
+                    fontSize: '1.35rem'
+                  }}
+                >
+                  Upcoming Thursdays
+                </h2>
+              </div>
+              <span
+                style={{
+                  color: 'var(--text-muted)',
+                  fontSize: '0.78rem'
+                }}
+              >
+                Next 12 Thursdays · updates automatically
+              </span>
+            </div>
+
+            <div
+              style={{
+                display: 'flex',
+                flexDirection: 'column',
+                gap: '1rem'
+              }}
+            >
+              {upcomingThemes.map((theme) => (
+                <ThemeCard
+                  key={theme.date}
+                  theme={theme}
+                  currentUser={currentUser}
+                  onSaveTheme={handleSaveTheme}
+                  onVote={handleVote}
+                  onSkip={handleSkip}
+                  busyDate={busyDate}
+                  editingDate={editingDate}
+                  isPast={false}
+                  setEditingDate={setEditingDate}
+                  editName={editName}
+                  setEditName={setEditName}
+                  editDescription={editDescription}
+                  setEditDescription={setEditDescription}
+                />
+              ))}
+            </div>
+          </section>
+
+          <section>
+            <div
+              style={{
+                display: 'flex',
+                justifyContent: 'space-between',
+                alignItems: 'flex-end',
+                gap: '1rem',
+                flexWrap: 'wrap',
+                marginBottom: '0.9rem'
+              }}
+            >
+              <div>
+                <div
+                  style={{
+                    color: 'var(--text-muted)',
+                    fontSize: '0.72rem',
+                    textTransform: 'uppercase',
+                    letterSpacing: '0.1em',
+                    fontWeight: '800',
+                    marginBottom: '0.2rem'
+                  }}
+                >
+                  Archive
+                </div>
+                <h2
+                  style={{
+                    margin: 0,
+                    fontSize: '1.35rem'
+                  }}
+                >
+                  Past Thursdays
+                </h2>
+              </div>
+              <span
+                style={{
+                  color: 'var(--text-muted)',
+                  fontSize: '0.78rem'
+                }}
+              >
+                Historical record · view only
+              </span>
+            </div>
+
+            {pastThemes.length === 0 ? (
+              <div
+                style={{
+                  padding: '1rem',
+                  borderRadius: '10px',
+                  border: '1px solid var(--border-color)',
+                  color: 'var(--text-muted)',
+                  background: 'var(--bg-card)'
+                }}
+              >
+                No past Thursdays have been recorded yet.
+              </div>
+            ) : (
+              <div
+                style={{
+                  display: 'flex',
+                  flexDirection: 'column',
+                  gap: '1rem'
+                }}
+              >
+                {pastThemes.map((theme) => (
+                  <ThemeCard
+                    key={theme.date}
+                    theme={theme}
+                    currentUser={currentUser}
+                    onSaveTheme={handleSaveTheme}
+                    onVote={handleVote}
+                    onSkip={handleSkip}
+                    busyDate={busyDate}
+                    editingDate={editingDate}
+                    isPast={true}
+                    setEditingDate={setEditingDate}
+                    editName={editName}
+                    setEditName={setEditName}
+                    editDescription={editDescription}
+                    setEditDescription={setEditDescription}
+                  />
+                ))}
+              </div>
+            )}
+          </section>
         </div>
       )}
     </div>
