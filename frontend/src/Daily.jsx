@@ -920,7 +920,7 @@ export default function Daily({
                 '1.5rem'
             }}
           >
-            Daily Moosic
+            Daily Song
           </h2>
 
           <p
@@ -968,9 +968,9 @@ export default function Daily({
         <section
           style={{
             background:
-              'linear-gradient(135deg, rgba(29,185,84,0.12), rgba(29,185,84,0.04))',
+              'color-mix(in srgb, var(--accent-green) 12%, var(--bg-card))',
             border:
-              '1px solid rgba(29,185,84,0.35)',
+              '1px solid color-mix(in srgb, var(--accent-green) 45%, var(--border-color))',
             borderRadius:
               '14px',
             padding:
@@ -989,7 +989,7 @@ export default function Daily({
         >
           <div>
             <strong>
-              You're viewing Moosic
+              You're viewing Music Book Club
               in read-only mode.
             </strong>
 
@@ -1010,26 +1010,17 @@ export default function Daily({
           </div>
 
           <button
-            onClick={
-              onGoToLogin
-            }
+            className="read-only-login-button"
+            onClick={onGoToLogin}
             style={{
-              background:
-                'var(--accent-green)',
-              color:
-                '#000',
-              border:
-                'none',
-              padding:
-                '0.65rem 1.2rem',
-              borderRadius:
-                '8px',
-              fontWeight:
-                'bold',
-              cursor:
-                'pointer',
-              whiteSpace:
-                'nowrap'
+              background: 'var(--accent-green)',
+              color: 'var(--accent-button-text)',
+              border: 'none',
+              padding: '0.65rem 1.2rem',
+              borderRadius: '8px',
+              fontWeight: 'bold',
+              cursor: 'pointer',
+              whiteSpace: 'nowrap'
             }}
           >
             Log In to Participate

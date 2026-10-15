@@ -1332,9 +1332,9 @@ export default function ThursdayThemes({
       <section
         style={{
           background:
-            'linear-gradient(135deg, rgba(29,185,84,0.12), rgba(29,185,84,0.025))',
+            'color-mix(in srgb, var(--accent-green) 12%, var(--bg-card))',
           border:
-            '1px solid rgba(29,185,84,0.25)',
+            '1px solid color-mix(in srgb, var(--accent-green) 45%, var(--border-color))',
           borderRadius:
             'var(--border-radius-lg)',
           padding: '1.5rem 1.6rem'
@@ -1418,16 +1418,26 @@ export default function ThursdayThemes({
           </div>
           <button
             onClick={onGoToLogin}
+            onMouseEnter={(e) => {
+              e.currentTarget.style.filter = 'brightness(1.15)';
+              e.currentTarget.style.transform = 'translateY(-2px)';
+              e.currentTarget.style.boxShadow =
+                '0 5px 12px rgba(0, 0, 0, 0.22)';
+            }}
+            onMouseLeave={(e) => {
+              e.currentTarget.style.filter = 'none';
+              e.currentTarget.style.transform = 'translateY(0)';
+              e.currentTarget.style.boxShadow = 'none';
+            }}
             style={{
-              background:
-                'var(--accent-green)',
-              color: '#000',
+              background: 'var(--accent-green)',
+              color: 'var(--accent-button-text)',
               border: 'none',
-              padding:
-                '0.65rem 1rem',
+              padding: '0.65rem 1rem',
               borderRadius: '8px',
               fontWeight: 'bold',
-              cursor: 'pointer'
+              cursor: 'pointer',
+              transition: 'all 0.18s ease'
             }}
           >
             Log in to participate

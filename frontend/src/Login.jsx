@@ -94,7 +94,7 @@ export default function Login({ onLogin }) {
             fontSize: '1.8rem'
           }}
         >
-          Welcome to Moosic
+          Welcome to Music Book Club
         </h2>
 
         <form

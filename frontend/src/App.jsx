@@ -24,6 +24,39 @@ const THEME_INFO = {
   },
 };
 
+const ACCENT_PALETTES = {
+  forest: {
+    name: "Forest Green",
+    light: "#3F8058",
+    dark: "#70C58D",
+  },
+  ocean: {
+    name: "Ocean Blue",
+    light: "#3268A5",
+    dark: "#83B6F0",
+  },
+  rose: {
+    name: "Rose Pink",
+    light: "#AD5275",
+    dark: "#F0A0C0",
+  },
+  plum: {
+    name: "Plum",
+    light: "#8054A6",
+    dark: "#C6A0E8",
+  },
+  terracotta: {
+    name: "Terracotta",
+    light: "#A95038",
+    dark: "#F0A087",
+  },
+  amber: {
+    name: "Golden Amber",
+    light: "#946A13",
+    dark: "#E9BF60",
+  },
+};
+
 export default function App() {
   const [token, setToken] = useState(() => {
     return localStorage.getItem('moosic_token');
@@ -52,6 +85,18 @@ export default function App() {
       ? savedTheme
       : 'dark';
   });
+
+  const [accentColor, setAccentColor] = useState(
+    () => {
+      const saved = localStorage.getItem("moosic_accent");
+      return saved && ACCENT_PALETTES[saved] ? saved : "forest";
+    }
+  );
+  
+  const changeAccentColor = (color) => {
+    setAccentColor(color);
+    localStorage.setItem("moosic_accent", color);
+  };
 
   useEffect(() => {
     document.documentElement.setAttribute(
@@ -123,7 +168,10 @@ export default function App() {
         minHeight: '100vh',
         background: 'var(--bg-primary)',
         color: 'var(--text-main)',
-        padding: '2rem'
+        padding: '2rem',
+        '--accent-green': ACCENT_PALETTES[accentColor][
+          theme === 'dark' ? 'dark' : 'light'
+        ],
       }}
     >
       <div
@@ -160,11 +208,11 @@ export default function App() {
               cursor: 'pointer',
               minWidth: 0
             }}
-            aria-label="Go to Moosic home"
+            aria-label="Go to Music Book Club home"
           >
             <img
-              src="/hamster.png"
-              alt="MPE Moosic logo"
+              src="/luckbookclub.jpg"
+              alt="MBC logo"
               style={{
                 width: '52px',
                 height: '52px',
@@ -181,7 +229,7 @@ export default function App() {
                 margin: 0
               }}
             >
-              MPE Moosic
+              Music Book Club
             </h1>
           </button>
 
@@ -217,6 +265,30 @@ export default function App() {
                 </button>
               ))}
             </div>
+
+            <div
+              className="accent-selector"
+              role="group"
+              aria-label="Choose accent color"
+            >
+              {Object.entries(ACCENT_PALETTES).map(([key, palette]) => (
+                <button
+                  key={key}
+                  type="button"
+                  className={`accent-option ${
+                    accentColor === key ? 'active' : ''
+                  }`}
+                  onClick={() => changeAccentColor(key)}
+                  title={palette.name}
+                  aria-label={`Choose ${palette.name}`}
+                  aria-pressed={accentColor === key}
+                  style={{
+                    backgroundColor:
+                      palette[theme === 'light' ? 'light' : 'dark'],
+                    }}
+                  />
+                ))}
+              </div>
 
             {isLoggedIn ? (
               <div
@@ -260,6 +332,7 @@ export default function App() {
               </div>
             ) : (
               <button
+                className="read-only-login-button"
                 onClick={() => setActiveTab('login')}
                 style={{
                   background: 'var(--accent-green)',

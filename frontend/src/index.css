@@ -28,21 +28,21 @@
 
 /* Light Mode */
 [data-theme='light'] {
-  --bg-primary: #f5f5f7;
-  --bg-secondary: #ffffff;
-  --bg-card: #ffffff;
-  --border-color: #e5e5ea;
+  --bg-primary: #f7f4eb;
+  --bg-secondary: #fffdf7;
+  --bg-card: #fffdf7;
+  --border-color: #deded0;
 
-  --text-main: #1d1d1f;
-  --text-muted: #68686d;
+  --text-main: #26372d;
+  --text-muted: #737b70;
 
-  --accent-green: #159447;
-  --accent-hover: #1aa852;
+  --accent-green: #3f8058;
+  --accent-hover: #4D9368;
   --accent-button-text: #ffffff;
 
-  --theme-button-bg: #ffffff;
-  --theme-button-border: #d9d9df;
-  --theme-button-hover: #f0f0f3;
+  --theme-button-bg: #fffdf7;
+  --theme-button-border: #d3d3d0;
+  --theme-button-hover: #eeeee3;
   --theme-glow: transparent;
 }
 
@@ -165,8 +165,10 @@ button {
 .theme-option:hover {
   color: var(--text-main);
   background: var(--theme-button-hover);
-  border-color: var(--text-muted);
-  transform: translateY(-1px);
+  border-color: var(--accent-green);
+  transform: translateY(-2px) scale(1.06);
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.18);
+  filter: brightness(1.08);
 }
 
 .theme-option.active {
@@ -223,7 +225,9 @@ button {
 }
 
 .nav-tab:hover {
-  color: var(--text-main);
+  color: var(--accent-green);
+  background: var(--theme-button-hover);
+  transform: translateY(-1px);
 }
 
 .nav-tab.active {
@@ -248,4 +252,56 @@ button {
     width: 29px;
     height: 29px;
   }
+}
+
+.accent-selector {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 12px;
+  margin-top: 16px;
+}
+
+.accent-option {
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  border: 2px solid transparent;
+  border-radius: 50%;
+  cursor: pointer;
+  transition: transform 0.2s ease, outline-color 0.2s ease;
+}
+
+.accent-option:hover {
+  transform: translateY(-2px) scale(1.12);
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.25);
+  filter: brightness(1.15);
+}
+
+.accent-option.active {
+  outline: 2px solid var(--text-main);
+  outline-offset: 3px;
+}
+
+/* Read-only notice login button */
+.read-only-login-button {
+  transition:
+    transform 0.18s ease,
+    filter 0.18s ease,
+    box-shadow 0.18s ease;
+}
+
+.read-only-login-button:hover {
+  filter: brightness(1.15);
+  transform: translateY(-2px);
+  box-shadow: 0 5px 12px rgba(0, 0, 0, 0.22);
+}
+
+.read-only-login-button:active {
+  transform: translateY(0) scale(0.98);
+}
+
+.read-only-login-button:focus-visible {
+  outline: 3px solid var(--text-main);
+  outline-offset: 3px;
 }
