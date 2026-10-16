@@ -39,7 +39,7 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-DATABASE_URL = os.getenv("DATABASE_URL", "sqlite:///moosic_local.db")
+DATABASE_URL = os.getenv("DATABASE_URL", "sqlite:///mbc_local.db")
 if DATABASE_URL.startswith("postgres://"):
     DATABASE_URL = DATABASE_URL.replace("postgres://", "postgresql://", 1)
 
@@ -75,22 +75,6 @@ class Vote(SQLModel, table=True):
     score: int
 
 
-class ThursdayTheme(SQLModel, table=True):
-    id: Optional[int] = Field(default=None, primary_key=True)
-    target_date: date = Field(unique=True, index=True)
-    proposer_id: Optional[int] = Field(default=None, index=True)
-    name: Optional[str] = None
-    description: Optional[str] = None
-    status: str = Field(default="pending", index=True)
-
-
-class ThursdayThemeVote(SQLModel, table=True):
-    id: Optional[int] = Field(default=None, primary_key=True)
-    theme_id: int = Field(index=True)
-    voter_id: int = Field(index=True)
-    in_favor: bool
-
-
 class SongCreate(BaseModel):
     title: str
     artist: str
@@ -120,17 +104,36 @@ class SpotifyUrlRequest(BaseModel):
     url: HttpUrl
 
 
-class ThursdayThemeUpdate(BaseModel):
+class FridayThemeProposal(SQLModel, table=True):
+    id: Optional[int] = Field(default=None, primary_key=True)
+    name: str = Field(index=True)
+    description: str
+    proposer_id: int = Field(index=True)
+    status: str = Field(default="pending", index=True)  # pending, approved, denied
+    created_at: datetime = Field(default_factory=datetime.utcnow, index=True)
+
+
+class FridayThemeProposalVote(SQLModel, table=True):
+    id: Optional[int] = Field(default=None, primary_key=True)
+    proposal_id: int = Field(index=True)
+    voter_id: int = Field(index=True)
+    in_favor: bool
+
+
+class FridayThemeWheelSelection(SQLModel, table=True):
+    id: Optional[int] = Field(default=None, primary_key=True)
+    proposal_id: int = Field(index=True, unique=True)
+    selected_at: datetime = Field(default_factory=datetime.utcnow, index=True)
+    spun_by_id: int
+
+
+class FridayThemeProposalCreate(BaseModel):
     name: str
     description: str
 
 
-class ThursdayThemeVoteCreate(BaseModel):
+class FridayThemeVoteCreate(BaseModel):
     in_favor: bool
-
-
-class ThursdayThemeSkipRequest(BaseModel):
-    skipped: bool
 
 
 def get_session():
@@ -1743,3 +1746,282 @@ def get_global_stats(
         "matrices": matrices,
         "usernames": usernames,
     }
+
+
+def _friday_wheel_spinner_usernames() -> set[str]:
+    """Comma-separated usernames allowed to spin; configure in backend .env."""
+    raw = os.getenv("THEME_WHEEL_SPINNERS", "wheel_admin")
+    return {part.strip().casefold() for part in raw.split(",") if part.strip()}
+
+
+def _require_friday_wheel_spinner(current_user: User) -> None:
+    if current_user.username.casefold() not in _friday_wheel_spinner_usernames():
+        raise HTTPException(
+            status_code=403,
+            detail="Only an authorized wheel spinner can spin the theme wheel."
+        )
+
+
+def _friday_proposal_response(
+    proposal: FridayThemeProposal,
+    session: Session,
+    current_user: Optional[User] = None,
+) -> dict:
+    votes = session.exec(
+        select(FridayThemeProposalVote).where(
+            FridayThemeProposalVote.proposal_id == proposal.id
+        )
+    ).all()
+    yes_count = sum(1 for vote in votes if vote.in_favor)
+    no_count = len(votes) - yes_count
+    current_vote = None
+    if current_user:
+        own_vote = next((vote for vote in votes if vote.voter_id == current_user.id), None)
+        if own_vote:
+            current_vote = own_vote.in_favor
+    proposer = session.get(User, proposal.proposer_id)
+    selection = session.exec(
+        select(FridayThemeWheelSelection).where(
+            FridayThemeWheelSelection.proposal_id == proposal.id
+        )
+    ).first()
+    return {
+        "id": proposal.id,
+        "name": proposal.name,
+        "description": proposal.description,
+        "status": proposal.status,
+        "proposer_username": proposer.username if proposer else "Unknown",
+        "created_at": proposal.created_at.isoformat() + "Z",
+        "yes_count": yes_count,
+        "no_count": no_count,
+        "vote_count": len(votes),
+        "current_user_vote": current_vote,
+        "selected_at": selection.selected_at.isoformat() + "Z" if selection else None,
+        "is_on_wheel": proposal.status == "approved" and selection is None,
+    }
+
+
+@app.get("/api/friday-themes/proposals")
+def list_friday_theme_proposals(
+    current_user: User = Depends(get_current_user),
+    session: Session = Depends(get_session),
+):
+    proposals = session.exec(
+        select(FridayThemeProposal).order_by(FridayThemeProposal.created_at.desc())
+    ).all()
+    return [_friday_proposal_response(item, session, current_user) for item in proposals]
+
+
+@app.post("/api/friday-themes/proposals")
+def create_friday_theme_proposal(
+    proposal_in: FridayThemeProposalCreate,
+    current_user: User = Depends(get_current_user),
+    session: Session = Depends(get_session),
+):
+    name = proposal_in.name.strip()
+    description = proposal_in.description.strip()
+    if not name:
+        raise HTTPException(status_code=400, detail="Theme name cannot be empty.")
+    if not description:
+        raise HTTPException(status_code=400, detail="Theme description cannot be empty.")
+    if len(name) > 100:
+        raise HTTPException(status_code=400, detail="Theme name must be 100 characters or fewer.")
+    if len(description) > 1000:
+        raise HTTPException(status_code=400, detail="Description must be 1,000 characters or fewer.")
+
+    proposal = FridayThemeProposal(
+        name=name,
+        description=description,
+        proposer_id=current_user.id,
+        status="pending",
+    )
+    session.add(proposal)
+    session.commit()
+    session.refresh(proposal)
+    return _friday_proposal_response(proposal, session, current_user)
+
+
+@app.post("/api/friday-themes/proposals/{proposal_id}/vote")
+def vote_on_friday_theme_proposal(
+    proposal_id: int,
+    vote_in: FridayThemeVoteCreate,
+    current_user: User = Depends(get_current_user),
+    session: Session = Depends(get_session),
+):
+    proposal = session.get(FridayThemeProposal, proposal_id)
+    if not proposal:
+        raise HTTPException(status_code=404, detail="Theme proposal not found.")
+    if proposal.status in {"approved", "denied"}:
+        raise HTTPException(status_code=400, detail="Voting is closed for this proposal.")
+
+    existing = session.exec(
+        select(FridayThemeProposalVote).where(
+            FridayThemeProposalVote.proposal_id == proposal_id,
+            FridayThemeProposalVote.voter_id == current_user.id,
+        )
+    ).first()
+    if existing:
+        existing.in_favor = vote_in.in_favor
+        session.add(existing)
+    else:
+        session.add(FridayThemeProposalVote(
+            proposal_id=proposal_id,
+            voter_id=current_user.id,
+            in_favor=vote_in.in_favor,
+        ))
+    session.commit()
+
+    votes = session.exec(
+        select(FridayThemeProposalVote).where(
+            FridayThemeProposalVote.proposal_id == proposal_id
+        )
+    ).all()
+    yes_count = sum(1 for vote in votes if vote.in_favor)
+    no_count = len(votes) - yes_count
+    # Strict majority of votes cast. A tie stays pending and is not approved.
+    if yes_count > no_count:
+        proposal.status = "approved"
+    elif no_count > yes_count:
+        proposal.status = "denied"
+    else:
+        proposal.status = "pending"
+    session.add(proposal)
+    session.commit()
+    session.refresh(proposal)
+    return _friday_proposal_response(proposal, session, current_user)
+
+
+@app.delete("/api/friday-themes/proposals/{proposal_id}/vote")
+def remove_friday_theme_vote(
+    proposal_id: int,
+    current_user: User = Depends(get_current_user),
+    session: Session = Depends(get_session),
+):
+    proposal = session.get(FridayThemeProposal, proposal_id)
+    if not proposal:
+        raise HTTPException(status_code=404, detail="Theme proposal not found.")
+    if proposal.status in {"approved", "denied"}:
+        raise HTTPException(status_code=400, detail="Voting is closed for this proposal.")
+    existing = session.exec(
+        select(FridayThemeProposalVote).where(
+            FridayThemeProposalVote.proposal_id == proposal_id,
+            FridayThemeProposalVote.voter_id == current_user.id,
+        )
+    ).first()
+    if existing:
+        session.delete(existing)
+        session.commit()
+        remaining_votes = session.exec(
+            select(FridayThemeProposalVote).where(
+                FridayThemeProposalVote.proposal_id == proposal_id
+            )
+        ).all()
+        yes_count = sum(1 for vote in remaining_votes if vote.in_favor)
+        no_count = len(remaining_votes) - yes_count
+        if yes_count > no_count:
+            proposal.status = "approved"
+        elif no_count > yes_count:
+            proposal.status = "denied"
+        else:
+            proposal.status = "pending"
+        session.add(proposal)
+        session.commit()
+    return {"status": "success", "message": "Vote removed"}
+
+
+@app.get("/api/friday-themes/wheel")
+def get_friday_theme_wheel(
+    current_user: User = Depends(get_current_user),
+    session: Session = Depends(get_session),
+):
+    approved = session.exec(
+        select(FridayThemeProposal).where(
+            FridayThemeProposal.status == "approved"
+        ).order_by(FridayThemeProposal.created_at.asc())
+    ).all()
+    available = []
+    for proposal in approved:
+        already_selected = session.exec(
+            select(FridayThemeWheelSelection).where(
+                FridayThemeWheelSelection.proposal_id == proposal.id
+            )
+        ).first()
+        if not already_selected:
+            available.append(_friday_proposal_response(proposal, session, current_user))
+    latest = session.exec(
+        select(FridayThemeWheelSelection).order_by(
+            FridayThemeWheelSelection.selected_at.desc()
+        )
+    ).first()
+    latest_response = None
+    if latest:
+        latest_proposal = session.get(FridayThemeProposal, latest.proposal_id)
+        if latest_proposal:
+            latest_response = _friday_proposal_response(latest_proposal, session, current_user)
+    allowed = current_user.username.casefold() in _friday_wheel_spinner_usernames()
+    return {"available": available, "latest_selection": latest_response, "can_spin": allowed}
+
+
+@app.post("/api/friday-themes/wheel/spin")
+def spin_friday_theme_wheel(
+    current_user: User = Depends(get_current_user),
+    session: Session = Depends(get_session),
+):
+    _require_friday_wheel_spinner(current_user)
+    approved = session.exec(
+        select(FridayThemeProposal).where(
+            FridayThemeProposal.status == "approved"
+        ).order_by(FridayThemeProposal.created_at.asc())
+    ).all()
+    available = []
+    for proposal in approved:
+        already_selected = session.exec(
+            select(FridayThemeWheelSelection).where(
+                FridayThemeWheelSelection.proposal_id == proposal.id
+            )
+        ).first()
+        if not already_selected:
+            available.append(proposal)
+    if not available:
+        raise HTTPException(
+            status_code=400,
+            detail="There are no approved, unused themes on the wheel yet."
+        )
+
+    import random
+    winner = random.choice(available)
+    selection = FridayThemeWheelSelection(
+        proposal_id=winner.id,
+        spun_by_id=current_user.id,
+    )
+    session.add(selection)
+    session.commit()
+    session.refresh(selection)
+    return {
+        "selection": _friday_proposal_response(winner, session, current_user),
+        "selected_at": selection.selected_at.isoformat() + "Z",
+        "spun_by": current_user.username,
+        "remaining_count": len(available) - 1,
+    }
+
+
+@app.get("/api/friday-themes/history")
+def get_friday_theme_history(
+    current_user: User = Depends(get_current_user),
+    session: Session = Depends(get_session),
+):
+    selections = session.exec(
+        select(FridayThemeWheelSelection).order_by(
+            FridayThemeWheelSelection.selected_at.desc()
+        )
+    ).all()
+    results = []
+    for selection in selections:
+        proposal = session.get(FridayThemeProposal, selection.proposal_id)
+        spinner = session.get(User, selection.spun_by_id)
+        if proposal:
+            item = _friday_proposal_response(proposal, session, current_user)
+            item["selected_at"] = selection.selected_at.isoformat() + "Z"
+            item["spun_by"] = spinner.username if spinner else "Unknown"
+            results.append(item)
+    return results

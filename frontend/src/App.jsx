@@ -5,6 +5,7 @@ import History from './History';
 import Stats from './Stats';
 import Profile from './Profile';
 import ThursdayThemes, { ThursdayThemeBanner } from './ThursdayThemes';
+import FridayThemes from "./FridayThemes";
 import './index.css';
 
 const THEME_MODES = ['dark', 'light', 'fun'];
@@ -379,6 +380,15 @@ export default function App() {
 
           <button
             className={`nav-tab ${
+              activeTab === 'friday-themes' ? 'active' : ''
+            }`}
+            onClick={() => setActiveTab('friday-themes')}
+          >
+            Friday Themes
+          </button>
+
+          <button
+            className={`nav-tab ${
               activeTab === 'history' ? 'active' : ''
             }`}
             onClick={() => setActiveTab('history')}
@@ -415,6 +425,13 @@ export default function App() {
 
           {activeTab === 'themes' && (
             <ThursdayThemes
+              currentUser={currentUser}
+              onGoToLogin={() => setActiveTab('login')}
+            />
+          )}
+
+          {activeTab === 'friday-themes' && (
+            <FridayThemes
               currentUser={currentUser}
               onGoToLogin={() => setActiveTab('login')}
             />

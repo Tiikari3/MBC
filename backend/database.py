@@ -63,7 +63,7 @@ class Theme(SQLModel, table=True):
 
 # save Render External Database URL as an environment variable
 # For local testing, you can paste it directly here as a string temporarily
-DATABASE_URL = os.getenv("DATABASE_URL", "postgresql://mpe_moosic_db_user:JLC5ijIyLRmevZR63XoARf5z0c9wGHpX@dpg-da91uqhsrm7s73au6sqg-a.oregon-postgres.render.com/mpe_moosic_db")
+DATABASE_URL = os.getenv("DATABASE_URL", "sqlite:///mbc_local.db")  # Default to local SQLite for development
 
 # Initialize the connection engine
 engine = create_engine(DATABASE_URL, echo=True)

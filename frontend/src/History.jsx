@@ -15,10 +15,10 @@ const getUserColor = (username) => {
 
 // NEW: Calculates the Excel-style gradient color based on the score
 const getScoreColor = (score) => {
-  // Ensure the score is between 1 and 5
-  const validScore = Math.max(1, Math.min(5, score));
-  // 1 = Hue 120 (Green), 3 = Hue 60 (Yellow), 5 = Hue 0 (Red)
-  const hue = 120 - ((validScore - 1) * 30);
+  // Ensure the score is between 1 and 8
+  const validScore = Math.max(1, Math.min(8, score));
+  // 1 = Hue 120 (Green), 4 = Hue 60 (Yellow), 8 = Hue 0 (Red)
+  const hue = 120 - ((validScore - 1) * 15);
   // Using 80% saturation and 60% lightness for an OLED-friendly pastel glow
   return `hsl(${hue}, 80%, 60%)`;
 };
