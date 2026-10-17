@@ -1,5 +1,16 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 
+const USER_COLORS = {
+  loganworsdell: '#9fc5e8',
+  parker: '#b4a7d6',
+  papipetro: '#dd7e6b',
+  rosey0316: '#ffc7ce',
+  typiont814: '#93c47d',
+  westonmiller: '#ffe599',
+  awesomegear3: '#f6b26b',
+  flocco: '#b7e1cd',
+};
+
 const API_URL = import.meta.env.VITE_API_URL;
 const tokenFromStorage = () => localStorage.getItem('moosic_token');
 
@@ -36,29 +47,137 @@ const cardStyle = {
   padding: '1.1rem',
 };
 
-function ProposalCard({ proposal, onVote, busy }) {
-  const decided = proposal.status === 'approved' || proposal.status === 'denied';
+function ProposalCard({ proposal, onVote, onManuallyApprove, busy, canManuallyApprove, isUsed }) {
+  const decided =
+    proposal.status === 'approved' || proposal.status === 'denied';
+
+  const statusLabel =
+    proposal.status === 'denied'
+      ? 'Failed · not approved'
+      : proposal.status === 'approved'
+        ? isUsed
+          ? 'Approved · already used'
+          : 'Approved · on wheel'
+        : 'Open for voting';
+
+  const statusColor =
+    proposal.status === 'denied'
+      ? '#c14d4d'
+      : proposal.status === 'approved'
+        ? '#26864b'
+        : 'var(--text-muted)';
+
+  const statusBackground =
+    proposal.status === 'denied'
+      ? 'rgba(193,77,77,.12)'
+      : proposal.status === 'approved'
+        ? 'rgba(38,134,75,.12)'
+        : 'var(--bg-secondary)';
+
   return (
     <article style={cardStyle}>
-      <div style={{ display: 'flex', gap: '0.75rem', justifyContent: 'space-between', alignItems: 'flex-start', flexWrap: 'wrap' }}>
+      <div
+        style={{
+          display: 'flex',
+          gap: '0.75rem',
+          justifyContent: 'space-between',
+          alignItems: 'flex-start',
+          flexWrap: 'wrap',
+        }}
+      >
         <div style={{ minWidth: 0, flex: 1 }}>
-          <h3 style={{ margin: '0 0 0.35rem', fontSize: '1.1rem' }}>{proposal.name}</h3>
-          <p style={{ margin: '0 0 0.7rem', color: 'var(--text-muted)', lineHeight: 1.5, whiteSpace: 'pre-wrap' }}>{proposal.description}</p>
+          <h3 style={{ margin: '0 0 0.35rem', fontSize: '1.1rem' }}>
+            {proposal.name}
+          </h3>
+
+          <p
+            style={{
+              margin: '0 0 0.7rem',
+              color: 'var(--text-muted)',
+              lineHeight: 1.5,
+              whiteSpace: 'pre-wrap',
+            }}
+          >
+            {proposal.description}
+          </p>
+
           <div style={{ color: 'var(--text-muted)', fontSize: '0.8rem' }}>
-            Proposed by {proposal.proposer_username} · {proposal.vote_count} vote{proposal.vote_count === 1 ? '' : 's'}
+            Proposed by {proposal.proposer_username} · {proposal.vote_count}{' '}
+            vote{proposal.vote_count === 1 ? '' : 's'}
           </div>
         </div>
-        <span style={{ fontSize: '0.75rem', fontWeight: 750, borderRadius: '999px', padding: '0.35rem 0.6rem', color: proposal.status === 'approved' ? '#26864b' : proposal.status === 'denied' ? '#c14d4d' : 'var(--text-muted)', background: proposal.status === 'approved' ? 'rgba(38,134,75,.12)' : proposal.status === 'denied' ? 'rgba(193,77,77,.12)' : 'var(--bg-secondary)' }}>
-          {proposal.status === 'approved' ? 'Approved · on wheel' : proposal.status === 'denied' ? 'Not approved' : 'Open for voting'}
+
+        <span
+          style={{
+            fontSize: '0.75rem',
+            fontWeight: 750,
+            borderRadius: '999px',
+            padding: '0.35rem 0.6rem',
+            color: statusColor,
+            background: statusBackground,
+          }}
+        >
+          {statusLabel}
         </span>
       </div>
-      <div style={{ display: 'flex', gap: '0.65rem', flexWrap: 'wrap', alignItems: 'center', marginTop: '1rem' }}>
-        <span style={{ color: 'var(--text-muted)', fontSize: '0.85rem' }}>👍 {proposal.yes_count} · 👎 {proposal.no_count}</span>
-        {!decided && <>
-          <button type="button" style={buttonStyle(proposal.current_user_vote === true, busy)} disabled={busy} onClick={() => onVote(proposal, true)}>👍 Vote yes</button>
-          <button type="button" style={buttonStyle(proposal.current_user_vote === false, busy)} disabled={busy} onClick={() => onVote(proposal, false)}>👎 Vote no</button>
-        </>}
-        {decided && <span style={{ color: 'var(--text-muted)', fontSize: '0.82rem' }}>Voting is closed.</span>}
+
+      <div
+        style={{
+          display: 'flex',
+          gap: '0.65rem',
+          flexWrap: 'wrap',
+          alignItems: 'center',
+          marginTop: '1rem',
+        }}
+      >
+        <span style={{ color: 'var(--text-muted)', fontSize: '0.85rem' }}>
+          👍 {proposal.yes_count} · 👎 {proposal.no_count}
+        </span>
+
+        {!decided && (
+          <>
+            <button
+              type="button"
+              style={buttonStyle(
+                proposal.current_user_vote === true,
+                busy
+              )}
+              disabled={busy}
+              onClick={() => onVote(proposal, true)}
+            >
+              👍 Vote yes
+            </button>
+
+            <button
+              type="button"
+              style={buttonStyle(
+                proposal.current_user_vote === false,
+                busy
+              )}
+              disabled={busy}
+              onClick={() => onVote(proposal, false)}
+            >
+              👎 Vote no
+            </button>
+          </>
+        )}
+
+        {decided && (
+          <span style={{ color: 'var(--text-muted)', fontSize: '0.82rem' }}>
+            Voting is closed.
+          </span>
+        )}
+
+        {canManuallyApprove && proposal.status !== 'approved' && (
+          <button
+            type="button"
+            style={buttonStyle(false, busy)}
+            disabled={busy}
+            onClick={() => onManuallyApprove(proposal)}
+          >
+            {busy ? 'Approving…' : '✓ Manually approve'}
+          </button>
+        )}
       </div>
     </article>
   );
@@ -130,19 +249,106 @@ export default function FridayThemes({ currentUser, onGoToLogin }) {
   };
 
   const castVote = async (proposal, inFavor) => {
-    if (!loggedIn) { onGoToLogin?.(); return; }
-    setBusyId(proposal.id); setError(''); setNotice('');
+    if (!loggedIn) {
+      onGoToLogin?.();
+      return;
+    }
+
+    setBusyId(proposal.id);
+    setError('');
+    setNotice('');
+
     try {
+      // Clicking the currently selected vote removes it.
+      // Clicking the opposite vote changes the vote.
       if (proposal.current_user_vote === inFavor) {
-        await apiRequest(`/api/friday-themes/proposals/${proposal.id}/vote`, { method: 'DELETE' });
+        await apiRequest(
+          `/api/friday-themes/proposals/${proposal.id}/vote`,
+          { method: 'DELETE' }
+        );
       } else {
-        await apiRequest(`/api/friday-themes/proposals/${proposal.id}/vote`, {
-          method: 'POST', body: JSON.stringify({ in_favor: inFavor }),
-        });
+        await apiRequest(
+          `/api/friday-themes/proposals/${proposal.id}/vote`,
+          {
+            method: 'POST',
+            body: JSON.stringify({ in_favor: inFavor }),
+          }
+        );
       }
+
+      // Update only this proposal in the UI.
+      // No full data refresh after voting.
+      setProposals(current =>
+        current.map(item => {
+          if (item.id !== proposal.id) return item;
+
+          let yes = item.yes_count;
+          let no = item.no_count;
+          const previousVote = item.current_user_vote;
+          const removingVote = previousVote === inFavor;
+
+          if (previousVote === true) yes--;
+          if (previousVote === false) no--;
+
+          if (!removingVote) {
+            if (inFavor) yes++;
+            else no++;
+          }
+
+          const total = yes + no;
+
+          let status = 'pending';
+          if (total >= 8) {
+            if (yes > no) status = 'approved';
+            else if (no > yes) status = 'denied';
+          }
+
+          return {
+            ...item,
+            yes_count: yes,
+            no_count: no,
+            vote_count: total,
+            current_user_vote: removingVote ? null : inFavor,
+            status,
+          };
+        })
+      );
+    } catch (err) {
+      setError(err.message || 'Could not submit your vote.');
+    } finally {
+      setBusyId(null);
+    }
+  };
+
+    const manuallyApproveProposal = async (proposal) => {
+    if (!loggedIn) {
+      onGoToLogin?.();
+      return;
+    }
+
+    const confirmed = window.confirm(
+      `Manually approve "${proposal.name}" and add it to the theme wheel?`
+    );
+
+    if (!confirmed) return;
+
+    setBusyId(proposal.id);
+    setError('');
+    setNotice('');
+
+    try {
+      await apiRequest(
+        `/api/friday-themes/proposals/${proposal.id}/approve`,
+        { method: 'POST' }
+      );
+
+      setNotice(`"${proposal.name}" has been manually approved.`);
       await refreshAll();
-    } catch (err) { setError(err.message); }
-    finally { setBusyId(null); }
+    } catch (err) {
+      setError(err.message || 'Could not approve this proposal.');
+    } finally {
+      setBusyId(null);
+    }
   };
 
   const spinWheel = async () => {
@@ -182,7 +388,7 @@ export default function FridayThemes({ currentUser, onGoToLogin }) {
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: '1.2rem' }}>
       <section style={{ ...cardStyle, padding: '1.4rem 1.5rem', background: 'color-mix(in srgb, var(--accent-green) 8%, var(--bg-card))' }}>
-        <div style={{ color: 'var(--accent-green)', fontSize: '0.76rem', fontWeight: 800, letterSpacing: '0.1em', textTransform: 'uppercase', marginBottom: '0.4rem' }}>MusicBookClub · Weekly tradition</div>
+        <div style={{ color: 'var(--accent-green)', fontSize: '0.76rem', fontWeight: 800, letterSpacing: '0.1em', textTransform: 'uppercase', marginBottom: '0.4rem' }}>Music Book Club · Bi-Weekly tradition</div>
         <h2 style={{ margin: 0, fontSize: '1.6rem' }}>Friday Themes</h2>
         <p style={{ margin: '0.55rem 0 0', color: 'var(--text-muted)', lineHeight: 1.6, maxWidth: '760px' }}>Suggest a theme whenever inspiration strikes, vote on the club’s ideas, and let the wheel pick a winning theme. Approved themes are only selected once.</p>
       </section>
@@ -206,7 +412,7 @@ export default function FridayThemes({ currentUser, onGoToLogin }) {
             <div><button type="submit" disabled={submitting || !name.trim() || !description.trim()} style={buttonStyle(true, submitting || !name.trim() || !description.trim())}>{submitting ? 'Submitting…' : 'Submit proposal'}</button></div>
           </form>
           <div style={{ display: 'flex', justifyContent: 'space-between', gap: '0.7rem', alignItems: 'baseline', flexWrap: 'wrap' }}><h3 style={{ margin: 0 }}>Club proposals</h3><span style={{ color: 'var(--text-muted)', fontSize: '0.85rem' }}>A strict majority of votes cast decides each proposal; ties remain open.</span></div>
-          {proposals.length === 0 ? <div style={cardStyle}><p style={{ margin: 0, color: 'var(--text-muted)' }}>No proposals yet. Add the first one above!</p></div> : proposals.map(proposal => <ProposalCard key={proposal.id} proposal={proposal} onVote={castVote} busy={busyId === proposal.id} />)}
+          {proposals.length === 0 ? <div style={cardStyle}><p style={{ margin: 0, color: 'var(--text-muted)' }}>No proposals yet. Add the first one above!</p></div> : proposals.map(proposal => <ProposalCard key={proposal.id} proposal={proposal} onVote={castVote} onManualApprove={manuallyApproveProposal} canManuallyApprove={wheel.can_spin} busy={busyId === proposal.id} isUsed={history.some(item => item.id === proposal.id)} />)}
         </div>}
 
         {tab === 'wheel' && <section style={{ ...cardStyle, display: 'grid', gap: '1rem', justifyItems: 'center', textAlign: 'center', padding: '1.5rem' }}>
@@ -224,9 +430,106 @@ export default function FridayThemes({ currentUser, onGoToLogin }) {
           {wheel.available.length > 0 && <div style={{ width: '100%', textAlign: 'left', marginTop: '0.4rem' }}><h4 style={{ margin: '0 0 0.65rem' }}>On the wheel</h4><div style={{ display: 'grid', gap: '0.55rem' }}>{wheel.available.map((item, index) => <div key={item.id} style={{ display: 'flex', gap: '0.65rem', alignItems: 'center', borderBottom: '1px solid var(--border-color)', padding: '0.5rem 0' }}><span style={{ width: '12px', height: '12px', borderRadius: '50%', background: wheelColors[index % wheelColors.length], flexShrink: 0 }} /><span style={{ fontWeight: 650 }}>{item.name}</span><span style={{ color: 'var(--text-muted)', fontSize: '0.82rem', marginLeft: 'auto' }}>{item.proposer_username}</span></div>)}</div></div>}
         </section>}
 
-        {tab === 'history' && <section style={{ display: 'grid', gap: '0.8rem' }}><div><h3 style={{ margin: '0 0 0.3rem' }}>Theme History</h3><p style={{ margin: 0, color: 'var(--text-muted)' }}>Past wheel selections are saved here and cannot be selected again.</p></div>
-          {history.length === 0 ? <div style={cardStyle}><p style={{ margin: 0, color: 'var(--text-muted)' }}>No themes have been selected by the wheel yet.</p></div> : history.map((item, index) => <article key={`${item.id}-${item.selected_at}`} style={cardStyle}><div style={{ display: 'flex', justifyContent: 'space-between', gap: '0.8rem', flexWrap: 'wrap' }}><h3 style={{ margin: 0 }}>{item.name}</h3><span style={{ color: 'var(--text-muted)', fontSize: '0.82rem' }}>#{history.length - index}</span></div><p style={{ margin: '0.55rem 0', color: 'var(--text-muted)', lineHeight: 1.5 }}>{item.description}</p><div style={{ color: 'var(--text-muted)', fontSize: '0.82rem' }}>Selected {item.selected_at ? new Date(item.selected_at).toLocaleString() : 'date unavailable'} · proposed by {item.proposer_username} · spun by {item.spun_by || 'Unknown'}</div></article>)}
-        </section>}
+        {tab === 'history' && (
+          <section style={{ display: 'grid', gap: '0.8rem' }}>
+            <div>
+              <h3 style={{ margin: '0 0 0.3rem' }}>Theme History</h3>
+              <p style={{ margin: 0, color: 'var(--text-muted)' }}>
+                Past wheel selections, winning songs, and winners.
+              </p>
+            </div>
+
+            {history.length === 0 ? (
+              <div style={cardStyle}>
+                <p style={{ margin: 0, color: 'var(--text-muted)' }}>
+                  No themes have been selected by the wheel yet.
+                </p>
+              </div>
+            ) : (
+              history.map((item, index) => (
+                <article
+                  key={`${item.id}-${item.selected_at}`}
+                  style={cardStyle}
+                >
+                  <div
+                    style={{
+                      display: 'flex',
+                      justifyContent: 'space-between',
+                      gap: '0.8rem',
+                      flexWrap: 'wrap',
+                      alignItems: 'center',
+                    }}
+                  >
+                    <h3 style={{ margin: 0 }}>{item.name}</h3>
+                    <span
+                      style={{
+                        color: 'var(--text-muted)',
+                        fontSize: '0.82rem',
+                      }}
+                    >
+                      #{history.length - index}
+                    </span>
+                  </div>
+
+                  <p
+                    style={{
+                      margin: '0.55rem 0',
+                      color: 'var(--text-muted)',
+                      lineHeight: 1.5,
+                    }}
+                  >
+                    {item.description}
+                  </p>
+
+                  <div
+                    style={{
+                      display: 'grid',
+                      gap: '0.55rem',
+                      marginTop: '0.8rem',
+                      padding: '0.85rem',
+                      borderRadius: '10px',
+                      background: 'var(--bg-secondary)',
+                    }}
+                  >
+                    <div>
+                      <span style={{ color: 'var(--text-muted)', fontSize: '0.82rem' }}>
+                        🏆 Winning song
+                      </span>
+                      <div style={{ fontWeight: 650, marginTop: '0.2rem' }}>
+                        {item.winning_song_title || 'No winning song recorded'}
+                      </div>
+                    </div>
+
+                    <div>
+                      <span style={{ color: 'var(--text-muted)', fontSize: '0.82rem' }}>
+                        🎉 Winner
+                      </span>
+                      <div style={{ fontWeight: 650, marginTop: '0.2rem' }}>
+                        {item.winner_username || 'Winner not recorded'}
+                      </div>
+                    </div>
+                  </div>
+
+                  <div
+                    style={{
+                      color: 'var(--text-muted)',
+                      fontSize: '0.82rem',
+                      marginTop: '0.8rem',
+                      lineHeight: 1.6,
+                    }}
+                  >
+                    Selected{' '}
+                    {item.selected_at
+                      ? new Date(item.selected_at).toLocaleString()
+                      : 'date unavailable'}
+                    {' · '}Proposed by {item.proposer_username}
+                    {' · '}Spun by {item.spun_by || 'Unknown'}
+                  </div>
+                </article>
+              ))
+            )}
+          </section>
+        )}
       </>}
     </div>
   );

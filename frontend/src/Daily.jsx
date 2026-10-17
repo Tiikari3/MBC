@@ -2,20 +2,74 @@ import { useState, useEffect, useCallback } from 'react';
 import './index.css';
 
 const USER_COLORS = {
-  alappatjoe: '#4ade80',
-  danram: '#60a5fa',
-  loganworsdell: '#fde047',
-  samuelbattista: '#9ca3af',
-  currydestroyer27: '#ffb085'
+  loganworsdell: '#9fc5e8',
+  parker: '#b4a7d6',
+  papipetro: '#dd7e6b',
+  rosey0316: '#ffc7ce',
+  typiont814: '#93c47d',
+  westonmiller: '#ffe599',
+  awesomegear3: '#f6b26b',
+  flocco: '#b7e1cd',
 };
 
 const getUserColor = (username) =>
   USER_COLORS[username?.toLowerCase()] || '#ffffff';
 
+const getPeerAverage = (song) => {
+  const peerVotes = (song.votes || []).filter(
+    (vote) =>
+      vote.username?.toLowerCase() !==
+      song.submittedBy?.toLowerCase()
+  );
+
+  if (peerVotes.length === 0) {
+    return null;
+  }
+
+  return (
+    peerVotes.reduce(
+      (total, vote) => total + Number(vote.score),
+      0
+    ) / peerVotes.length
+  );
+};
+
+const compareSongsByRanking = (a, b) => {
+  // 1. Lowest overall average
+  const averageDifference =
+    Number(a.average) - Number(b.average);
+
+  if (Math.abs(averageDifference) > 0.000001) {
+    return averageDifference;
+  }
+
+  // 2. Lowest peer average, excluding the submitter
+  const peerA = getPeerAverage(a);
+  const peerB = getPeerAverage(b);
+
+  if (peerA === null && peerB !== null) return 1;
+  if (peerB === null && peerA !== null) return -1;
+
+  if (peerA !== null && peerB !== null) {
+    const peerDifference = peerA - peerB;
+
+    if (Math.abs(peerDifference) > 0.000001) {
+      return peerDifference;
+    }
+  }
+
+  // 3. Lowest standard deviation
+  return Number(a.stdev || 0) - Number(b.stdev || 0);
+};
+
 const getScoreColor = (score) => {
+  const clampedScore = Math.max(
+    1,
+    Math.min(8, Number(score))
+  );
+
   const hue =
-    120 -
-    ((Math.max(1, Math.min(5, score)) - 1) * 30);
+    120 - ((clampedScore - 1) * 120 / 7);
 
   return `hsl(${hue}, 80%, 60%)`;
 };
@@ -40,6 +94,9 @@ export default function Daily({
 
   const [targetSongs, setTargetSongs] =
     useState([]);
+
+  const [upcomingFridayTheme, setUpcomingFridayTheme] =
+  useState(null);
 
   const [myVotes, setMyVotes] =
     useState({});
@@ -194,6 +251,48 @@ export default function Daily({
     fetchDataForDate();
   }, [fetchDataForDate]);
 
+  useEffect(() => {
+  let isMounted = true;
+
+  const fetchUpcomingFridayTheme = async () => {
+    try {
+      const response = await fetch(
+        `${import.meta.env.VITE_API_URL}/api/friday-themes/upcoming`
+      );
+
+      if (!response.ok) {
+        throw new Error(
+          'Failed to load the upcoming Friday theme.'
+        );
+      }
+
+      const data = await response.json();
+
+      if (isMounted) {
+        setUpcomingFridayTheme(data.theme || null);
+      }
+    } catch (error) {
+      console.error(
+        'Failed to load upcoming Friday theme:',
+        error
+      );
+    }
+  };
+
+  fetchUpcomingFridayTheme();
+
+  // Refresh periodically so an open Daily page can update after a spin.
+  const intervalId = setInterval(
+    fetchUpcomingFridayTheme,
+    60000
+  );
+
+  return () => {
+    isMounted = false;
+    clearInterval(intervalId);
+  };
+}, []);
+
   const mySong = currentUser
     ? targetSongs.find(
         (song) =>
@@ -218,25 +317,9 @@ export default function Daily({
         song.average !== undefined
     );
 
-  const sortedSongs =
-    [...songsWithVotes].sort(
-      (a, b) => {
-        const averageDifference =
-          Number(a.average) -
-          Number(b.average);
-
-        if (
-          averageDifference !== 0
-        ) {
-          return averageDifference;
-        }
-
-        return (
-          Number(a.stdev || 0) -
-          Number(b.stdev || 0)
-        );
-      }
-    );
+  const sortedSongs = [...songsWithVotes].sort(
+    compareSongsByRanking
+  );
 
   const winner =
     sortedSongs.length > 0
@@ -259,9 +342,7 @@ export default function Daily({
     : '#fde047';
 
   const allSongsPosted =
-    targetSongs.length > 0 &&
-    targetSongs.length ===
-      totalUserCount;
+    targetSongs.length > 0;
 
   const allSongsHaveScores =
     targetSongs.length > 0 &&
@@ -963,6 +1044,84 @@ export default function Daily({
           }}
         />
       </section>
+
+    {upcomingFridayTheme && (
+      <section
+        style={{
+          background:
+            'color-mix(in srgb, var(--accent-green) 12%, var(--bg-card))',
+          border:
+            '1px solid color-mix(in srgb, var(--accent-green) 50%, var(--border-color))',
+          borderRadius: '14px',
+          padding: '1.25rem 1.5rem',
+          display: 'flex',
+          alignItems: 'center',
+          gap: '1rem',
+          flexWrap: 'wrap'
+        }}
+      >
+      <div
+        style={{
+          fontSize: '2rem',
+          lineHeight: 1
+        }}
+      >
+        🎡
+      </div>
+
+      <div style={{ flex: 1, minWidth: '220px' }}>
+        <div
+          style={{
+            color: 'var(--accent-green)',
+            fontSize: '0.75rem',
+            fontWeight: 'bold',
+            textTransform: 'uppercase',
+            letterSpacing: '0.08em',
+            marginBottom: '0.3rem'
+          }}
+        >
+          Upcoming Friday Theme
+        </div>
+
+        <h3
+          style={{
+            margin: 0,
+            fontSize: '1.2rem'
+          }}
+        >
+          {upcomingFridayTheme.name}
+        </h3>
+
+        <p
+          style={{
+            color: 'var(--text-muted)',
+            margin: '0.35rem 0 0',
+            fontSize: '0.9rem'
+          }}
+        >
+          {new Date(
+            `${upcomingFridayTheme.theme_date}T12:00:00`
+          ).toLocaleDateString('en-US', {
+            weekday: 'long',
+            month: 'long',
+            day: 'numeric',
+            year: 'numeric'
+          })}
+        </p>
+
+        {upcomingFridayTheme.description && (
+          <p
+            style={{
+              margin: '0.5rem 0 0',
+              lineHeight: 1.5
+            }}
+          >
+            {upcomingFridayTheme.description}
+          </p>
+        )}
+      </div>
+    </section>
+  )}
 
       {!currentUser && (
         <section
@@ -2155,6 +2314,8 @@ export default function Daily({
                     song.average || 0
                   );
 
+                const peerAverage = getPeerAverage(song);
+
                 return (
                   <article
                     key={
@@ -2313,26 +2474,6 @@ export default function Daily({
                             </a>
                           )}
 
-                          <span
-                            style={{
-                              color:
-                                'var(--text-muted)',
-                              fontSize:
-                                '0.8rem'
-                            }}
-                          >
-                            {song.average !==
-                            null &&
-                            song.average !==
-                              undefined
-                              ? `Average ${average.toFixed(2)}`
-                              : 'No votes yet'}
-
-                            {song.vote_count
-                              ? ` • ${song.vote_count} vote${song.vote_count === 1 ? '' : 's'}`
-                              : ''}
-                          </span>
-
                           {isMySong && (
                             <button
                               onClick={() =>
@@ -2365,46 +2506,62 @@ export default function Daily({
 
                       <div
                         style={{
-                          textAlign:
-                            'right',
-                          minWidth:
-                            '70px'
+                          textAlign: 'right',
+                          minWidth: '130px',
+                          flexShrink: 0
                         }}
                       >
-                        {song.average !==
-                          null &&
-                          song.average !==
-                            undefined && (
-                            <>
-                              <div
-                                style={{
-                                  fontSize:
-                                    '1.35rem',
-                                  fontWeight:
-                                    'bold',
-                                  color:
-                                    getScoreColor(
-                                      average
-                                    )
-                                }}
-                              >
-                                {average.toFixed(
-                                  2
-                                )}
-                              </div>
+                        {/* Overall average */}
+                        <div
+                          style={{
+                            fontSize: '1.35rem',
+                            fontWeight: 'bold',
+                            color: getScoreColor(average)
+                          }}
+                        >
+                          {song.average !== null &&
+                          song.average !== undefined
+                            ? average.toFixed(2)
+                            : '—'}
+                        </div>
 
-                              <div
-                                style={{
-                                  fontSize:
-                                    '0.72rem',
-                                  color:
-                                    'var(--text-muted)'
-                                }}
-                              >
-                                average
-                              </div>
-                            </>
-                          )}
+                        {/* Peer average and standard deviation on one line */}
+                        <div
+                          style={{
+                            display: 'flex',
+                            justifyContent: 'flex-end',
+                            gap: '0.6rem',
+                            fontSize: '0.72rem',
+                            color: 'var(--text-muted)',
+                            whiteSpace: 'nowrap'
+                          }}
+                        >
+                          <span>
+                            Peer: {peerAverage !== null
+                              ? peerAverage.toFixed(2)
+                              : '—'}
+                          </span>
+
+                          <span>
+                            σ: {song.stdev !== null &&
+                            song.stdev !== undefined
+                              ? Number(song.stdev).toFixed(2)
+                              : '—'}
+                          </span>
+                        </div>
+
+                        {/* Vote count */}
+                        <div
+                          style={{
+                            fontSize: '0.72rem',
+                            color: 'var(--text-muted)'
+                          }}
+                        >
+                          {song.vote_count || 0}{' '}
+                          {(song.vote_count || 0) === 1
+                            ? 'vote'
+                            : 'votes'}
+                        </div>
                       </div>
                     </div>
 
@@ -2453,7 +2610,7 @@ export default function Daily({
                               : 0.65
                         }}
                       >
-                        {[1, 2, 3, 4, 5].map(
+                        {[1, 2, 3, 4, 5, 6, 7, 8].map(
                           (score) => {
                             const selected =
                               Boolean(

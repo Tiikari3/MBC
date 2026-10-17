@@ -4,7 +4,6 @@ import Daily from './Daily';
 import History from './History';
 import Stats from './Stats';
 import Profile from './Profile';
-import ThursdayThemes, { ThursdayThemeBanner } from './ThursdayThemes';
 import FridayThemes from "./FridayThemes";
 import './index.css';
 
@@ -371,15 +370,6 @@ export default function App() {
 
           <button
             className={`nav-tab ${
-              activeTab === 'themes' ? 'active' : ''
-            }`}
-            onClick={() => setActiveTab('themes')}
-          >
-            Thursday Themes
-          </button>
-
-          <button
-            className={`nav-tab ${
               activeTab === 'friday-themes' ? 'active' : ''
             }`}
             onClick={() => setActiveTab('friday-themes')}
@@ -423,13 +413,6 @@ export default function App() {
             <Login onLogin={handleLogin} />
           )}
 
-          {activeTab === 'themes' && (
-            <ThursdayThemes
-              currentUser={currentUser}
-              onGoToLogin={() => setActiveTab('login')}
-            />
-          )}
-
           {activeTab === 'friday-themes' && (
             <FridayThemes
               currentUser={currentUser}
@@ -443,10 +426,6 @@ export default function App() {
 
           {activeTab === 'daily' && (
             <>
-              <ThursdayThemeBanner
-                currentUser={currentUser}
-                onGoToThemes={() => setActiveTab('themes')}
-              />
               <Daily
                 currentUser={currentUser}
                 onGoToLogin={() => setActiveTab('login')}

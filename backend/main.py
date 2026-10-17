@@ -1,9 +1,9 @@
 import os
 import re
 import statistics
-from datetime import datetime, date, timedelta
+from datetime import datetime, date, timedelta, timezone
 from typing import Optional
-
+from zoneinfo import ZoneInfo
 import bcrypt
 import httpx
 from dotenv import load_dotenv
@@ -110,7 +110,7 @@ class FridayThemeProposal(SQLModel, table=True):
     description: str
     proposer_id: int = Field(index=True)
     status: str = Field(default="pending", index=True)  # pending, approved, denied
-    created_at: datetime = Field(default_factory=datetime.utcnow, index=True)
+    created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc), index=True,)
 
 
 class FridayThemeProposalVote(SQLModel, table=True):
@@ -123,8 +123,11 @@ class FridayThemeProposalVote(SQLModel, table=True):
 class FridayThemeWheelSelection(SQLModel, table=True):
     id: Optional[int] = Field(default=None, primary_key=True)
     proposal_id: int = Field(index=True, unique=True)
-    selected_at: datetime = Field(default_factory=datetime.utcnow, index=True)
+    selected_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc), index=True,)
     spun_by_id: int
+    winning_song_id: Optional[int] = Field(default=None)
+    winner_id: Optional[int] = Field(default=None)
+    theme_date: Optional[date] = Field(default=None)
 
 
 class FridayThemeProposalCreate(BaseModel):
@@ -170,6 +173,42 @@ def ensure_database_columns():
                 connection.execute(
                     text("ALTER TABLE song ADD COLUMN spotify_track_id TEXT")
                 )
+
+
+def ensure_friday_theme_columns():
+    """Add the assigned Friday date without deleting existing selections."""
+    table_name = "fridaythemewheelselection"
+
+    inspector = inspect(engine)
+
+    if not inspector.has_table(table_name):
+        return
+
+    existing = {
+        column["name"]
+        for column in inspector.get_columns(table_name)
+    }
+
+    if "theme_date" in existing:
+        return
+
+    backend = engine.url.get_backend_name()
+
+    with engine.begin() as connection:
+        if backend == "postgresql":
+            connection.execute(
+                text(
+                    "ALTER TABLE fridaythemewheelselection "
+                    "ADD COLUMN IF NOT EXISTS theme_date DATE"
+                )
+            )
+        else:
+            connection.execute(
+                text(
+                    "ALTER TABLE fridaythemewheelselection "
+                    "ADD COLUMN theme_date DATE"
+                )
+            )
 
 
 def create_access_token(data: dict):
@@ -451,6 +490,7 @@ def build_theme_response(
 def on_startup():
     SQLModel.metadata.create_all(engine)
     ensure_database_columns()
+    ensure_friday_theme_columns()
 
 
 @app.get("/api/health")
@@ -1748,6 +1788,22 @@ def get_global_stats(
     }
 
 
+def get_next_friday_date() -> date:
+    """Return the next Friday in Eastern Time, never today."""
+    today = datetime.now(
+        ZoneInfo("America/New_York")
+    ).date()
+
+    # Monday = 0, Friday = 4.
+    days_until_friday = (4 - today.weekday()) % 7
+
+    # If today is Friday, assign the following Friday instead.
+    if days_until_friday == 0:
+        days_until_friday = 7
+
+    return today + timedelta(days=days_until_friday)
+
+
 def _friday_wheel_spinner_usernames() -> set[str]:
     """Comma-separated usernames allowed to spin; configure in backend .env."""
     raw = os.getenv("THEME_WHEEL_SPINNERS", "wheel_admin")
@@ -1798,6 +1854,7 @@ def _friday_proposal_response(
         "current_user_vote": current_vote,
         "selected_at": selection.selected_at.isoformat() + "Z" if selection else None,
         "is_on_wheel": proposal.status == "approved" and selection is None,
+        "theme_date": (selection.theme_date.isoformat() if selection and selection.theme_date else None),
     }
 
 
@@ -1840,6 +1897,37 @@ def create_friday_theme_proposal(
     session.refresh(proposal)
     return _friday_proposal_response(proposal, session, current_user)
 
+@app.post("/api/friday-themes/proposals/{proposal_id}/approve")
+def manually_approve_friday_theme_proposal(
+    proposal_id: int,
+    current_user: User = Depends(get_current_user),
+    session: Session = Depends(get_session),
+):
+    # Only an authorized administrator/wheel spinner can approve manually.
+    _require_friday_wheel_spinner(current_user)
+
+    proposal = session.get(FridayThemeProposal, proposal_id)
+
+    if not proposal:
+        raise HTTPException(
+            status_code=404,
+            detail="Theme proposal not found.",
+        )
+
+    if proposal.status == "approved":
+        return _friday_proposal_response(
+            proposal, session, current_user
+        )
+
+    # Allow manually overriding either pending or denied status.
+    proposal.status = "approved"
+    session.add(proposal)
+    session.commit()
+    session.refresh(proposal)
+
+    return _friday_proposal_response(
+        proposal, session, current_user
+    )
 
 @app.post("/api/friday-themes/proposals/{proposal_id}/vote")
 def vote_on_friday_theme_proposal(
@@ -1878,13 +1966,19 @@ def vote_on_friday_theme_proposal(
     ).all()
     yes_count = sum(1 for vote in votes if vote.in_favor)
     no_count = len(votes) - yes_count
-    # Strict majority of votes cast. A tie stays pending and is not approved.
-    if yes_count > no_count:
-        proposal.status = "approved"
-    elif no_count > yes_count:
+    # Reject immediately when there are 3 or more no votes.
+    # Otherwise, require at least 8 total votes before approval.
+    MIN_VOTES_FOR_AUTOMATIC_DECISION = 8
+
+    total_votes = yes_count + no_count
+
+    if no_count >= 3:
         proposal.status = "denied"
+    elif total_votes >= MIN_VOTES_FOR_AUTOMATIC_DECISION and yes_count > no_count:
+        proposal.status = "approved"
     else:
         proposal.status = "pending"
+
     session.add(proposal)
     session.commit()
     session.refresh(proposal)
@@ -1918,15 +2012,23 @@ def remove_friday_theme_vote(
         ).all()
         yes_count = sum(1 for vote in remaining_votes if vote.in_favor)
         no_count = len(remaining_votes) - yes_count
-        if yes_count > no_count:
-            proposal.status = "approved"
-        elif no_count > yes_count:
-            proposal.status = "denied"
-        else:
-            proposal.status = "pending"
-        session.add(proposal)
-        session.commit()
-    return {"status": "success", "message": "Vote removed"}
+       # Reject immediately when there are 3 or more no votes.
+    # Otherwise, require at least 8 total votes before approval.
+    MIN_VOTES_FOR_AUTOMATIC_DECISION = 8
+
+    total_votes = yes_count + no_count
+
+    if no_count >= 3:
+        proposal.status = "denied"
+    elif total_votes >= MIN_VOTES_FOR_AUTOMATIC_DECISION and yes_count > no_count:
+        proposal.status = "approved"
+    else:
+        proposal.status = "pending"
+
+    session.add(proposal)
+    session.commit()
+    session.refresh(proposal)
+    return _friday_proposal_response(proposal, session, current_user)
 
 
 @app.get("/api/friday-themes/wheel")
@@ -1993,6 +2095,7 @@ def spin_friday_theme_wheel(
     selection = FridayThemeWheelSelection(
         proposal_id=winner.id,
         spun_by_id=current_user.id,
+        theme_date=get_next_friday_date(),
     )
     session.add(selection)
     session.commit()
@@ -2000,8 +2103,50 @@ def spin_friday_theme_wheel(
     return {
         "selection": _friday_proposal_response(winner, session, current_user),
         "selected_at": selection.selected_at.isoformat() + "Z",
+        "theme_date": selection.theme_date.isoformat(),
         "spun_by": current_user.username,
         "remaining_count": len(available) - 1,
+    }
+
+
+@app.get("/api/friday-themes/upcoming")
+def get_upcoming_friday_theme(
+    session: Session = Depends(get_session),
+):
+    """Return the theme assigned to the nearest upcoming Friday."""
+    today = datetime.now(
+        ZoneInfo("America/New_York")
+    ).date()
+
+    selection = session.exec(
+        select(FridayThemeWheelSelection)
+        .where(
+            FridayThemeWheelSelection.theme_date >= today
+        )
+        .order_by(
+            FridayThemeWheelSelection.theme_date.asc(),
+            FridayThemeWheelSelection.selected_at.desc(),
+        )
+    ).first()
+
+    if not selection:
+        return {"theme": None}
+
+    proposal = session.get(
+        FridayThemeProposal,
+        selection.proposal_id,
+    )
+
+    if not proposal:
+        return {"theme": None}
+
+    return {
+        "theme": {
+            "name": proposal.name,
+            "description": proposal.description,
+            "theme_date": selection.theme_date.isoformat(),
+            "selected_at": selection.selected_at.isoformat(),
+        }
     }
 
 
@@ -2015,13 +2160,48 @@ def get_friday_theme_history(
             FridayThemeWheelSelection.selected_at.desc()
         )
     ).all()
+
     results = []
+
     for selection in selections:
-        proposal = session.get(FridayThemeProposal, selection.proposal_id)
+        proposal = session.get(
+            FridayThemeProposal,
+            selection.proposal_id,
+        )
         spinner = session.get(User, selection.spun_by_id)
+
+        # Look up the winner
+        winner = (
+            session.get(User, selection.winner_id)
+            if selection.winner_id is not None
+            else None
+        )
+
+        # Look up the winning song
+        song = (
+            session.get(Song, selection.winning_song_id)
+            if selection.winning_song_id is not None
+            else None
+        )
+
         if proposal:
-            item = _friday_proposal_response(proposal, session, current_user)
+            item = _friday_proposal_response(
+                proposal,
+                session,
+                current_user,
+            )
+
             item["selected_at"] = selection.selected_at.isoformat() + "Z"
-            item["spun_by"] = spinner.username if spinner else "Unknown"
+            item["spun_by"] = (
+                spinner.username if spinner else "Unknown"
+            )
+            item["winner_username"] = (
+                winner.username if winner else None
+            )
+            item["winning_song_title"] = (
+                song.title if song else None
+            )
+
             results.append(item)
+
     return results

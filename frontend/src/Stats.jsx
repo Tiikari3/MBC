@@ -2,11 +2,14 @@ import { useState, useEffect } from 'react';
 import './index.css';
 
 const USER_COLORS = {
-  'alappatjoe': '#4ade80',      
-  'danram': '#60a5fa',          
-  'loganworsdell': '#fde047',   
-  'samuelbattista': '#9ca3af',  
-  'currydestroyer27': '#ffb085' 
+  loganworsdell: '#9fc5e8',
+  parker: '#b4a7d6',
+  papipetro: '#dd7e6b',
+  rosey0316: '#ffc7ce',
+  typiont814: '#93c47d',
+  westonmiller: '#ffe599',
+  awesomegear3: '#f6b26b',
+  flocco: '#b7e1cd',
 };
 
 const getUserColor = (username) => USER_COLORS[username?.toLowerCase()] || '#ffffff';
