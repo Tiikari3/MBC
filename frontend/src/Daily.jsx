@@ -2596,84 +2596,30 @@ export default function Daily({
                           : 'Voting'}
                       </div>
 
-                      <div
-                        style={{
-                          display:
-                            'flex',
-                          gap:
-                            '0.4rem',
-                          alignItems:
-                            'center',
-                          opacity:
-                            currentUser
-                              ? 1
-                              : 0.65
-                        }}
-                      >
+                      <div className="vote-score-grid" style={{opacity: currentUser ? 1 : 0.65,}}>
+
                         {[1, 2, 3, 4, 5, 6, 7, 8].map(
                           (score) => {
                             const selected =
-                              Boolean(
-                                currentUser
-                              ) &&
-                              myVotes[
-                                song.id
-                              ] ===
-                                score;
+                              Boolean(currentUser) &&
+                              myVotes[song.id] === score;
 
-                            const baseColor =
-                              getScoreColor(
-                                score
-                              );
-
+                            const baseColor = getScoreColor(score);
                             return (
                               <button
-                                key={
-                                  score
-                                }
-                                onClick={() =>
-                                  handleScoreClick(
-                                    song.id,
-                                    score
-                                  )
-                                }
-                                disabled={
-                                  !currentUser
-                                }
-                                title={
-                                  currentUser
-                                    ? `Give ${song.title} a ${score}`
-                                    : 'Log in to vote'
-                                }
+                                key={score}
+                                className="vote-score-button"
+                                onClick={() => handleScoreClick(song.id, score)}
+                                disabled={!currentUser}
+                                title={currentUser ? `Give ${song.title} a ${score}` : 'Log in to vote'}
                                 style={{
-                                  width:
-                                    38,
-                                  height:
-                                    38,
-                                  borderRadius:
-                                    '9px',
-                                  border:
-                                    `2px solid ${
-                                      selected
-                                        ? baseColor
-                                        : `${baseColor}55`
-                                    }`,
-                                  background:
-                                    selected
-                                      ? baseColor
-                                      : 'transparent',
-                                  color:
-                                    selected
-                                      ? '#000'
-                                      : baseColor,
-                                  fontWeight:
-                                    'bold',
-                                  cursor:
-                                    currentUser
-                                      ? 'pointer'
-                                      : 'not-allowed',
-                                  transition:
-                                    'all 0.15s ease'
+                                  borderRadius: '9px',
+                                  border: `2px solid ${selected ? baseColor : `${baseColor}55`}`,
+                                  background: selected ? baseColor : 'transparent',
+                                  color: selected ? '#000' : baseColor,
+                                  fontWeight: 'bold',
+                                  cursor: currentUser ? 'pointer' : 'not-allowed',
+                                  transition: 'all 0.15s ease',
                                 }}
                               >
                                 {score}

@@ -254,33 +254,120 @@ button {
   }
 }
 
-.accent-selector {
+/* Accent colors inside Profile */
+.profile-layout {
+  width: 100%;
+}
+
+.profile-settings-card {
+  width: 100%;
+  max-width: 500px;
+  min-width: 0;
+  padding: 2rem;
+  box-sizing: border-box;
+  background: var(--bg-card);
+  border: 1px solid var(--border-color);
+  border-radius: var(--border-radius-lg);
+}
+
+.profile-card-title {
+  margin-bottom: 0.5rem;
+  font-size: 1.4rem;
+}
+
+.profile-card-description {
+  color: var(--text-muted);
+  margin-bottom: 1.25rem;
+  font-size: 0.9rem;
+  line-height: 1.5;
+}
+
+.profile-accent-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 0.65rem;
+}
+
+.profile-accent-option {
+  min-width: 0;
   display: flex;
+  flex-direction: column;
   align-items: center;
-  flex-wrap: wrap;
-  gap: 12px;
-  margin-top: 16px;
-}
-
-.accent-option {
-  width: 28px;
-  height: 28px;
-  padding: 0;
-  border: 2px solid transparent;
-  border-radius: 50%;
+  justify-content: center;
+  gap: 0.5rem;
+  padding: 0.8rem 0.35rem;
+  border: 1px solid var(--border-color);
+  border-radius: 10px;
+  background: var(--bg-secondary);
+  color: var(--text-main);
   cursor: pointer;
-  transition: transform 0.2s ease, outline-color 0.2s ease;
+  text-align: center;
 }
 
-.accent-option:hover {
-  transform: translateY(-2px) scale(1.12);
-  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.25);
-  filter: brightness(1.15);
+.profile-accent-option:hover {
+  border-color: var(--accent-green);
+  transform: translateY(-1px);
 }
 
-.accent-option.active {
-  outline: 2px solid var(--text-main);
-  outline-offset: 3px;
+.profile-accent-option.active {
+  border: 2px solid var(--accent-green);
+  background: color-mix(
+    in srgb,
+    var(--accent-green) 10%,
+    var(--bg-secondary)
+  );
+}
+
+.profile-accent-option:focus-visible {
+  outline: 2px solid var(--accent-green);
+  outline-offset: 2px;
+}
+
+.profile-accent-swatch {
+  width: 30px;
+  height: 30px;
+  flex-shrink: 0;
+  border-radius: 50%;
+  border: 1px solid rgba(127, 127, 127, 0.3);
+}
+
+.profile-accent-name {
+  font-size: 0.8rem;
+  overflow-wrap: anywhere;
+}
+
+.profile-accent-selected {
+  font-size: 0.7rem;
+  font-weight: 700;
+  color: var(--accent-green);
+}
+
+@media (max-width: 760px) {
+  .profile-layout {
+    margin-top: 1rem !important;
+  }
+
+  .profile-settings-card {
+    padding: 1.5rem !important;
+  }
+
+  .profile-accent-grid {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 0.5rem;
+  }
+
+  .profile-accent-option {
+    padding: 0.75rem 0.2rem;
+  }
+
+  .profile-accent-swatch {
+    width: 26px;
+    height: 26px;
+  }
+
+  .profile-accent-name {
+    font-size: 0.72rem;
+  }
 }
 
 /* Read-only notice login button */
@@ -304,4 +391,36 @@ button {
 .read-only-login-button:focus-visible {
   outline: 3px solid var(--text-main);
   outline-offset: 3px;
+}
+
+/* Daily voting score buttons */
+.vote-score-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 0.5rem;
+  width: 100%;
+  max-width: 360px;
+  min-width: 0;
+}
+
+.vote-score-button {
+  width: 100%;
+  min-width: 0;
+  height: 40px;
+  padding: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 1rem;
+}
+
+@media (max-width: 760px) {
+  .vote-score-grid {
+    max-width: none;
+    gap: 0.45rem;
+  }
+
+  .vote-score-button {
+    height: 42px;
+  }
 }
