@@ -266,30 +266,6 @@ export default function App() {
               ))}
             </div>
 
-            <div
-              className="accent-selector"
-              role="group"
-              aria-label="Choose accent color"
-            >
-              {Object.entries(ACCENT_PALETTES).map(([key, palette]) => (
-                <button
-                  key={key}
-                  type="button"
-                  className={`accent-option ${
-                    accentColor === key ? 'active' : ''
-                  }`}
-                  onClick={() => changeAccentColor(key)}
-                  title={palette.name}
-                  aria-label={`Choose ${palette.name}`}
-                  aria-pressed={accentColor === key}
-                  style={{
-                    backgroundColor:
-                      palette[theme === 'light' ? 'light' : 'dark'],
-                    }}
-                  />
-                ))}
-              </div>
-
             {isLoggedIn ? (
               <div
                 style={{
@@ -439,6 +415,10 @@ export default function App() {
               <Profile
                 currentUser={currentUser}
                 onProfileUpdate={handleProfileUpdate}
+                accentColor={accentColor}
+                changeAccentColor={changeAccentColor}
+                accentPalettes={ACCENT_PALETTES}
+                theme={theme}
               />
             )}
         </main>

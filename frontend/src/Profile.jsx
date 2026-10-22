@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import './index.css';
 
-export default function Profile({ currentUser, onProfileUpdate }) {
+export default function Profile({ currentUser, onProfileUpdate, accentColor, changeAccentColor, accentPalettes, theme }) {
   // Safely check for the username, falling back to localStorage if the prop is missing!
   const defaultUser = currentUser?.username || currentUser || localStorage.getItem('user') || '';
   const [username, setUsername] = useState(defaultUser);
@@ -62,22 +62,59 @@ export default function Profile({ currentUser, onProfileUpdate }) {
   };
 
   return (
-    <div style={{ display: 'flex', justifyContent: 'center', marginTop: '2rem' }}>
-      <div style={{
-        background: 'var(--bg-card)', padding: '2.5rem', width: '100%', maxWidth: '500px',
-        borderRadius: 'var(--border-radius-lg)', border: '1px solid var(--border-color)',
-      }}>
+    <div className="profile-layout" style={{display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '1rem', marginTop: '2rem',}}>
+      <div className="profile-settings-card accent-settings-card">
+        <h2 className="profile-card-title">Accent Color</h2>
+
+        <p className="profile-card-description">
+          Choose the accent color used for buttons and highlights across the site.
+        </p>
+
+        <div
+          className="profile-accent-grid"
+          role="group"
+          aria-label="Choose accent color"
+        >
+          {Object.entries(accentPalettes).map(([key, palette]) => (
+            <button
+              key={key}
+              type="button"
+              className={`profile-accent-option ${
+                accentColor === key ? 'active' : ''
+              }`}
+              onClick={() => changeAccentColor(key)}
+              aria-label={`Choose ${palette.name}`}
+              aria-pressed={accentColor === key}
+            >
+              <span
+                className="profile-accent-swatch"
+                style={{
+                  backgroundColor:
+                    palette[theme === 'dark' ? 'dark' : 'light'],
+                }}
+              />
+
+              <span className="profile-accent-name">{palette.name}</span>
+
+              {accentColor === key && (
+                <span className="profile-accent-selected">Selected</span>
+              )}
+            </button>
+          ))}
+        </div>
+      </div>
+
+      <div className="profile-settings-card" style={{background: 'var(--bg-card)', padding: '2.5rem', width: '100%', maxWidth: '500px', borderRadius: 'var(--border-radius-lg)', border: '1px solid var(--border-color)',}}>
         <h2 style={{ marginBottom: '0.5rem', fontSize: '1.5rem' }}>Account Settings</h2>
         <p style={{ color: 'var(--text-muted)', marginBottom: '2rem', fontSize: '0.9rem' }}>
           Leave the password fields blank if you only want to change your username.
         </p>
-        
+
         <form onSubmit={handleSubmit} style={{ display: 'flex', flexDirection: 'column', gap: '1.2rem' }}>
-          
           <div>
             <label style={{ display: 'block', color: 'var(--text-muted)', marginBottom: '0.5rem', fontSize: '0.9rem' }}>Username</label>
-            <input 
-              type="text" 
+            <input
+              type="text"
               value={username}
               onChange={(e) => setUsername(e.target.value)}
               style={{ width: '100%', padding: '0.8rem', borderRadius: '8px', border: '1px solid var(--border-color)', background: 'var(--bg-secondary)', color: 'var(--text-main)', fontSize: '1rem' }}
@@ -89,8 +126,8 @@ export default function Profile({ currentUser, onProfileUpdate }) {
 
           <div>
             <label style={{ display: 'block', color: 'var(--text-muted)', marginBottom: '0.5rem', fontSize: '0.9rem' }}>New Password</label>
-            <input 
-              type="password" 
+            <input
+              type="password"
               value={password}
               placeholder="Enter new password..."
               onChange={(e) => setPassword(e.target.value)}
@@ -100,8 +137,8 @@ export default function Profile({ currentUser, onProfileUpdate }) {
 
           <div>
             <label style={{ display: 'block', color: 'var(--text-muted)', marginBottom: '0.5rem', fontSize: '0.9rem' }}>Confirm New Password</label>
-            <input 
-              type="password" 
+            <input
+              type="password"
               value={confirmPassword}
               placeholder="Confirm new password..."
               onChange={(e) => setConfirmPassword(e.target.value)}
@@ -110,7 +147,7 @@ export default function Profile({ currentUser, onProfileUpdate }) {
           </div>
 
           {status && (
-            <div style={{ 
+            <div style={{
               padding: '1rem', borderRadius: '8px', textAlign: 'center', fontWeight: 'bold',
               background: status.type === 'success' ? 'rgba(46, 213, 115, 0.1)' : 'rgba(255, 71, 87, 0.1)',
               color: status.type === 'success' ? '#2ed573' : '#ff4757'
@@ -121,12 +158,11 @@ export default function Profile({ currentUser, onProfileUpdate }) {
 
           <button type="submit" disabled={isLoading} style={{
             background: 'var(--accent-green)', color: '#000', border: 'none',
-            padding: '1rem', borderRadius: '8px', fontWeight: 'bold', fontSize: '1rem', 
+            padding: '1rem', borderRadius: '8px', fontWeight: 'bold', fontSize: '1rem',
             cursor: isLoading ? 'not-allowed' : 'pointer', marginTop: '1rem'
           }}>
             {isLoading ? 'Saving...' : 'Save Changes'}
           </button>
-
         </form>
       </div>
     </div>
