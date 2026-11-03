@@ -2285,6 +2285,11 @@ def _advance_bracket_if_ready(session, tournament):
             previous_round = rounds.get(round_number - 1, {})
             current_round_matches = rounds.get(round_number, {})
 
+            # Imported brackets may not contain every earlier round.
+            # Never clear existing matchups when their feeder round is missing.
+            if not previous_round:
+                continue
+
             for matchup_number, match in current_round_matches.items():
                 if match.status == "complete":
                     continue
@@ -2397,6 +2402,7 @@ def _advance_bracket_if_ready(session, tournament):
             final_round_number + 1,
         )
         session.flush()
+        return
 
 
 def _resolve_match_if_ready(session, tournament, match):
