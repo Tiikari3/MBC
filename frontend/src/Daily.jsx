@@ -149,6 +149,12 @@ export default function Daily({
   const [confirmingDelete, setConfirmingDelete] =
     useState(false);
 
+  const [isDailyAdmin, setIsDailyAdmin] = useState(false);
+  const [dailyTieBreak, setDailyTieBreak] = useState(null);
+  const [selectedTieBreakSongId, setSelectedTieBreakSongId] = useState("");
+  const [isSavingTieBreak, setIsSavingTieBreak] = useState(false);
+  const [tieBreakError, setTieBreakError] = useState("");
+
   const handleUnauthorized = useCallback(() => {
     localStorage.removeItem('moosic_token');
     localStorage.removeItem('moosic_user');
@@ -158,6 +164,7 @@ export default function Daily({
   const fetchDataForDate = useCallback(async () => {
     setIsLoadingSongs(true);
     setVoteError(null);
+    setTieBreakError("");
 
     try {
       const songsResponse = await fetch(
@@ -173,6 +180,25 @@ export default function Daily({
       const songs = await songsResponse.json();
 
       setTargetSongs(songs);
+
+      // Load the saved tie-break decision for this date.
+      const tieBreakResponse = await fetch(
+        `${import.meta.env.VITE_API_URL}/api/songs/daily/${selectedDate}/tie-break`
+      );
+
+      if (tieBreakResponse.ok) {
+        const tieBreakData = await tieBreakResponse.json();
+
+        setDailyTieBreak(tieBreakData);
+        setSelectedTieBreakSongId(
+          tieBreakData.winning_song_id
+            ? String(tieBreakData.winning_song_id)
+            : ""
+        );
+      } else {
+        setDailyTieBreak(null);
+        setSelectedTieBreakSongId("");
+      }
 
       const statsResponse = await fetch(
         `${import.meta.env.VITE_API_URL}/api/stats`
@@ -197,26 +223,44 @@ export default function Daily({
           return;
         }
 
-        const myVotesResponse = await fetch(
-          `${import.meta.env.VITE_API_URL}/api/votes/me/${selectedDate}`,
+        // Check whether the logged-in user is an admin.
+        const permissionsResponse = await fetch(
+          `${import.meta.env.VITE_API_URL}/api/brackets/permissions`,
           {
             headers: {
-              Authorization:
-                `Bearer ${token}`
+              Authorization: `Bearer ${token}`
             }
           }
         );
 
-        if (
-          myVotesResponse.status === 401
-        ) {
+        if (permissionsResponse.status === 401) {
+          handleUnauthorized();
+          return;
+        }
+
+        if (permissionsResponse.ok) {
+          const permissions = await permissionsResponse.json();
+          setIsDailyAdmin(permissions.is_admin === true);
+        } else {
+          setIsDailyAdmin(false);
+        }
+
+        const myVotesResponse = await fetch(
+          `${import.meta.env.VITE_API_URL}/api/votes/me/${selectedDate}`,
+          {
+            headers: {
+              Authorization: `Bearer ${token}`
+            }
+          }
+        );
+
+        if (myVotesResponse.status === 401) {
           handleUnauthorized();
           return;
         }
 
         if (myVotesResponse.ok) {
-          const voteData =
-            await myVotesResponse.json();
+          const voteData = await myVotesResponse.json();
 
           setMyVotes(voteData);
           setSavedVotes(voteData);
@@ -225,6 +269,7 @@ export default function Daily({
           setSavedVotes({});
         }
       } else {
+        setIsDailyAdmin(false);
         setMyVotes({});
         setSavedVotes({});
       }
@@ -246,6 +291,59 @@ export default function Daily({
     currentUser,
     handleUnauthorized
   ]);
+
+  const handleSaveTieBreak = async () => {
+    if (!selectedTieBreakSongId) {
+      setTieBreakError("Please select a song.");
+      return;
+    }
+
+    const token = localStorage.getItem("moosic_token");
+
+    if (!token) {
+      handleUnauthorized();
+      return;
+    }
+
+    setIsSavingTieBreak(true);
+    setTieBreakError("");
+
+    try {
+      const response = await fetch(
+        `${import.meta.env.VITE_API_URL}/api/songs/daily/${selectedDate}/tie-break`,
+        {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${token}`
+          },
+          body: JSON.stringify({
+            winning_song_id: Number(selectedTieBreakSongId)
+          })
+        }
+      );
+
+      const data = await response.json();
+
+      if (!response.ok) {
+        throw new Error(
+          data.detail || "Failed to save the tie-break decision."
+        );
+      }
+
+      setDailyTieBreak({
+        winning_song_id: Number(selectedTieBreakSongId)
+      });
+    } catch (error) {
+      console.error("Failed to save tie-break:", error);
+
+      setTieBreakError(
+        error.message || "Failed to save the tie-break decision."
+      );
+    } finally {
+      setIsSavingTieBreak(false);
+    }
+  };
 
   useEffect(() => {
     fetchDataForDate();
@@ -308,32 +406,55 @@ export default function Daily({
    * Standard deviation breaks ties.
    */
 
-  const songsWithVotes =
-    targetSongs.filter(
-      (song) =>
-        Array.isArray(song.votes) &&
-        song.votes.length > 0 &&
-        song.average !== null &&
-        song.average !== undefined
-    );
+  const songsWithVotes = targetSongs.filter(
+    song =>
+      Array.isArray(song.votes) &&
+      song.votes.length > 0 &&
+      song.average !== null &&
+      song.average !== undefined
+  );
 
   const sortedSongs = [...songsWithVotes].sort(
     compareSongsByRanking
   );
 
-  const winner =
-    sortedSongs.length > 0
-      ? sortedSongs[0]
-      : null;
+  // The automatically ranked first-place song.
+  const automaticWinner =
+    sortedSongs.length > 0 ? sortedSongs[0] : null;
 
-  const winnerHasAllVotes =
-    Boolean(
-      winner &&
-        totalUserCount > 0 &&
-        Array.isArray(winner.votes) &&
-        winner.votes.length ===
-          totalUserCount
-    );
+  // Identify every song tied for first place.
+  const tiedTopSongs = automaticWinner
+    ? sortedSongs.filter(
+        song => compareSongsByRanking(song, automaticWinner) === 0
+      )
+    : [];
+
+  // Check that every song has received a vote from every registered user.
+  const allSongsFullyVoted = Boolean(
+    targetSongs.length > 0 &&
+    totalUserCount > 0 &&
+    targetSongs.every(
+      song =>
+        Array.isArray(song.votes) &&
+        song.votes.length === totalUserCount
+    )
+  );
+
+  // Use the saved admin decision if one exists.
+  // Otherwise, use the automatic ranking.
+  const manualWinner = dailyTieBreak?.winning_song_id
+    ? targetSongs.find(
+        song =>
+          Number(song.id) ===
+          Number(dailyTieBreak.winning_song_id)
+      )
+    : null;
+
+  const winner = manualWinner || automaticWinner;
+
+  const winnerHasAllVotes = Boolean(
+    winner && allSongsFullyVoted
+  );
 
   const winnerColor = winner
     ? getUserColor(
@@ -2072,7 +2193,9 @@ export default function Daily({
                     1
                 }}
               >
-                👑
+                {tiedTopSongs.length > 1 && !dailyTieBreak?.winning_song_id
+                  ? '🤝'
+                  : '👑'}
               </span>
 
               <div>
@@ -2088,9 +2211,15 @@ export default function Daily({
                       '0.08em'
                   }}
                 >
-                  {winnerHasAllVotes
-                    ? 'Winner'
-                    : 'Current Leader'}
+                  {dailyTieBreak?.winning_song_id
+                    ? 'Admin Selected Winner'
+                    : tiedTopSongs.length > 1 && allSongsFullyVoted
+                      ? 'Tied for First'
+                      : tiedTopSongs.length > 1
+                        ? 'Current Tie for First'
+                        : winnerHasAllVotes
+                          ? 'Winner'
+                          : 'Current Leader'}
                 </div>
 
                 <strong
@@ -2144,6 +2273,99 @@ export default function Daily({
               </div>
             )
           )}
+
+          {/* ADMIN TIE-BREAK CONTROLS */}
+          {isDailyAdmin &&
+            tiedTopSongs.length > 1 && (
+              <div
+                style={{
+                  width: '100%',
+                  padding: '1rem',
+                  marginTop: '0.5rem',
+                  borderRadius: '10px',
+                  background: 'var(--bg-secondary)',
+                  border: '1px solid var(--accent-green)',
+                  display: 'flex',
+                  flexDirection: 'column',
+                  gap: '0.75rem'
+                }}
+              >
+                <div>
+                  <strong>Admin Tie-Break</strong>
+                  <p
+                    style={{
+                      margin: '0.3rem 0 0',
+                      color: 'var(--text-muted)',
+                      fontSize: '0.85rem'
+                    }}
+                  >
+                    Everyone has voted on every song.
+                    Select the winner from the songs tied for first.
+                  </p>
+                </div>
+
+                <select
+                  value={selectedTieBreakSongId}
+                  onChange={(event) =>
+                    setSelectedTieBreakSongId(event.target.value)
+                  }
+                  style={{
+                    padding: '0.7rem',
+                    borderRadius: '8px',
+                    background: 'var(--bg-primary)',
+                    color: 'var(--text-main)',
+                    border: '1px solid var(--border-color)',
+                    fontSize: '0.95rem'
+                  }}
+                >
+                  <option value="">Select the winning song</option>
+
+                  {tiedTopSongs.map((song) => (
+                    <option key={song.id} value={String(song.id)}>
+                      {song.title} — {song.artist} ({song.submittedBy})
+                    </option>
+                  ))}
+                </select>
+
+                <button
+                  onClick={handleSaveTieBreak}
+                  disabled={
+                    !selectedTieBreakSongId ||
+                    isSavingTieBreak ||
+                    Number(selectedTieBreakSongId) ===
+                      Number(dailyTieBreak?.winning_song_id)
+                  }
+                  style={{
+                    background: 'var(--accent-green)',
+                    color: '#000',
+                    border: 'none',
+                    padding: '0.7rem 1rem',
+                    borderRadius: '8px',
+                    fontWeight: 'bold',
+                    cursor: 'pointer',
+                    opacity:
+                      !selectedTieBreakSongId ||
+                      isSavingTieBreak ||
+                      Number(selectedTieBreakSongId) ===
+                        Number(dailyTieBreak?.winning_song_id)
+                        ? 0.5
+                        : 1
+                  }}
+                >
+                  {isSavingTieBreak
+                    ? 'Saving...'
+                    : dailyTieBreak?.winning_song_id
+                      ? 'Update Tie-Break Winner'
+                      : 'Confirm Tie-Break Winner'}
+                </button>
+
+                {tieBreakError && (
+                  <div style={{ color: '#ff4757', fontSize: '0.85rem' }}>
+                    {tieBreakError}
+                  </div>
+                )}
+              </div>
+            )}
 
           {currentUser &&
             targetSongs.length >

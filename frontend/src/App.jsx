@@ -5,6 +5,7 @@ import History from './History';
 import Stats from './Stats';
 import Profile from './Profile';
 import FridayThemes from "./FridayThemes";
+import Brackets from "./Brackets";
 import './index.css';
 
 const THEME_MODES = ['dark', 'light', 'fun'];
@@ -355,6 +356,15 @@ export default function App() {
 
           <button
             className={`nav-tab ${
+              activeTab === 'brackets' ? 'active' : ''
+            }`}
+            onClick={() => setActiveTab('brackets')}
+          >
+            Brackets
+          </button>
+
+          <button
+            className={`nav-tab ${
               activeTab === 'history' ? 'active' : ''
             }`}
             onClick={() => setActiveTab('history')}
@@ -391,6 +401,13 @@ export default function App() {
 
           {activeTab === 'friday-themes' && (
             <FridayThemes
+              currentUser={currentUser}
+              onGoToLogin={() => setActiveTab('login')}
+            />
+          )}
+
+          {activeTab === 'brackets' && (
+            <Brackets
               currentUser={currentUser}
               onGoToLogin={() => setActiveTab('login')}
             />

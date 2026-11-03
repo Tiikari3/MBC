@@ -12,7 +12,10 @@ const USER_COLORS = {
   flocco: '#b7e1cd',
 };
 
-const getUserColor = (username) => USER_COLORS[username?.toLowerCase()] || '#ffffff';
+const getUserColor = (username) =>
+  USER_COLORS[username?.toLowerCase()] || '#888888';
+
+const getUserTextColor = () => '#000000';
 
 const getScoreColor = (score) => {
   if (!score || score === 0) return 'transparent'; 
@@ -35,21 +38,21 @@ const Th = ({ children, align = 'center', bg = 'var(--bg-secondary)' }) => (
 
 const MatrixTable = ({ title, daysFilter, users, dataObj }) => (
   <div style={{ background: 'var(--bg-card)', borderRadius: '8px', border: '1px solid var(--border-color)', overflow: 'hidden', width: '100%' }}>
-    <div style={{ background: '#000', padding: '0.5rem', textAlign: 'center', borderBottom: '1px solid var(--border-color)' }}>
+    <div style={{ background: 'var(--bg-secondary)', color: 'var(--text-main)', padding: '0.5rem', textAlign: 'center', borderBottom: '1px solid var(--border-color)' }}>
       <h3 style={{ margin: 0, fontSize: '0.95rem' }}>{title} <span style={{color: 'var(--accent-green)'}}>{daysFilter}</span> days</h3>
     </div>
     <div style={{ overflowX: 'auto', width: '100%' }}>
       <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.85rem' }}>
         <thead>
           <tr>
-            <Th bg="#000">Poster \ Voter</Th>
-            {users.map(u => <Th key={u} bg="#000">{u}</Th>)}
+            <Th bg="var(--bg-secondary)">Poster \ Voter</Th>
+            {users.map(u => <Th key={u} bg="var(--bg-secondary)">{u}</Th>)}
           </tr>
         </thead>
         <tbody>
           {users.map(poster => (
             <tr key={poster}>
-              <Th bg="#000">{poster}</Th>
+              <Th bg="var(--bg-secondary)">{poster}</Th>
               {users.map(voter => {
                 const val = dataObj?.[poster]?.[voter] || 0;
                 return (
@@ -92,7 +95,7 @@ const WinsLineChart = ({ data, users }) => {
           const val = Math.round(maxWins * (1 - ratio));
           return (
             <g key={i}>
-              <line x1={padding} y1={y} x2={width - padding} y2={y} stroke="#333" strokeDasharray="4 4" />
+              <line x1={padding} y1={y} x2={width - padding} y2={y} stroke="var(--border-color)" strokeDasharray="4 4" />
               <text x={padding - 10} y={y + 4} fill="var(--text-muted)" fontSize="10" textAnchor="end">{val}</text>
             </g>
           );
@@ -174,24 +177,24 @@ export default function Stats() {
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(350px, 1fr))', gap: '1rem' }}>
         
         <div style={{ background: 'var(--bg-card)', borderRadius: '8px', overflow: 'hidden', border: '1px solid var(--border-color)' }}>
-          <div style={{ background: '#000', padding: '0.5rem', textAlign: 'center' }}>
+          <div style={{ background: 'var(--bg-secondary)', color: 'var(--text-main)', padding: '0.5rem', textAlign: 'center' }}>
             <h3 style={{ margin: 0, fontSize: '1rem' }}>Player Lifetime Stats</h3>
           </div>
           <div style={{ overflowX: 'auto' }}>
             <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.9rem' }}>
               <thead>
                 <tr>
-                  <Th bg="#000">Player</Th>
-                  <Th bg="#000">Wins</Th>
-                  <Th bg="#000">Sum of Avg</Th>
-                  <Th bg="#000">Overall Avg</Th>
-                  <Th bg="#000">Place</Th>
+                  <Th bg="var(--bg-secondary)">Player</Th>
+                  <Th bg="var(--bg-secondary)">Wins</Th>
+                  <Th bg="var(--bg-secondary)">Sum of Avg</Th>
+                  <Th bg="var(--bg-secondary)">Overall Avg</Th>
+                  <Th bg="var(--bg-secondary)">Place</Th>
                 </tr>
               </thead>
               <tbody>
                 {(stats.manager_stats || []).map((s) => (
                   <tr key={s.manager}>
-                    <Td bg={getUserColor(s.manager)} color="#000"><strong>{s.manager}</strong></Td>
+                    <Td bg={getUserColor(s.manager)} color={getUserTextColor()}><strong>{s.manager}</strong></Td>
                     <Td>{s.wins || 0}</Td>
                     <Td>{(s.sum_avg || 0).toFixed(2)}</Td>
                     <Td>{(s.overall_avg || 0).toFixed(2)}</Td>
@@ -204,26 +207,29 @@ export default function Stats() {
         </div>
 
         <div style={{ background: 'var(--bg-card)', borderRadius: '8px', overflow: 'hidden', border: '1px solid var(--border-color)' }}>
-          <div style={{ background: '#000', padding: '0.5rem', textAlign: 'center' }}>
+          <div style={{ background: 'var(--bg-secondary)', color: 'var(--text-main)', padding: '0.5rem', textAlign: 'center' }}>
             <h3 style={{ margin: 0, fontSize: '1rem' }}>Day Rank Frequency</h3>
           </div>
           <div style={{ overflowX: 'auto' }}>
             <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.9rem' }}>
               <thead>
                 <tr>
-                  <Th bg="#000">Poster \ Rank</Th>
-                  <Th bg="#000">1</Th><Th bg="#000">2</Th><Th bg="#000">3</Th><Th bg="#000">4</Th><Th bg="#000">5</Th>
+                  <Th bg="var(--bg-secondary)">Poster \ Rank</Th>
+                  <Th bg="var(--bg-secondary)">1</Th><Th bg="var(--bg-secondary)">2</Th><Th bg="var(--bg-secondary)">3</Th><Th bg="var(--bg-secondary)">4</Th><Th bg="var(--bg-secondary)">5</Th><Th bg="var(--bg-secondary)">6</Th><Th bg="var(--bg-secondary)">7</Th><Th bg="var(--bg-secondary)">8</Th>
                 </tr>
               </thead>
               <tbody>
                 {users.map(u => (
                   <tr key={u}>
-                    <Td bg={getUserColor(u)} color="#000"><strong>{u}</strong></Td>
+                    <Td bg={getUserColor(u)} color={getUserTextColor()}><strong>{u}</strong></Td>
                     <Td>{stats.rank_counts?.[u]?.[1] || 0}</Td>
                     <Td>{stats.rank_counts?.[u]?.[2] || 0}</Td>
                     <Td>{stats.rank_counts?.[u]?.[3] || 0}</Td>
                     <Td>{stats.rank_counts?.[u]?.[4] || 0}</Td>
                     <Td>{stats.rank_counts?.[u]?.[5] || 0}</Td>
+                    <Td>{stats.rank_counts?.[u]?.[6] || 0}</Td>
+                    <Td>{stats.rank_counts?.[u]?.[7] || 0}</Td>
+                    <Td>{stats.rank_counts?.[u]?.[8] || 0}</Td>
                   </tr>
                 ))}
               </tbody>

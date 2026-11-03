@@ -1,6 +1,7 @@
 import os
 import re
 import statistics
+from functools import cmp_to_key
 from datetime import datetime, date, timedelta, timezone
 from typing import Optional
 from zoneinfo import ZoneInfo
@@ -74,6 +75,16 @@ class Vote(SQLModel, table=True):
     voter_id: int
     score: int
 
+class DailyTieBreak(SQLModel, table=True):
+    id: Optional[int] = Field(default=None, primary_key=True)
+    submission_date: date = Field(index=True, unique=True)
+    winning_song_id: int
+    selected_by_user_id: int
+    selected_at: datetime = Field(
+        default_factory=lambda: datetime.now(timezone.utc)
+    )
+
+
 
 class SongCreate(BaseModel):
     title: str
@@ -93,6 +104,9 @@ class SongUpdate(BaseModel):
 class VoteCreate(BaseModel):
     song_id: int
     score: int
+
+class DailyTieBreakRequest(BaseModel):
+    winning_song_id: int
 
 
 class ProfileUpdate(BaseModel):
@@ -137,6 +151,51 @@ class FridayThemeProposalCreate(BaseModel):
 
 class FridayThemeVoteCreate(BaseModel):
     in_favor: bool
+
+# --- Song bracket tables ---
+
+class BracketTournament(SQLModel, table=True):
+    id: Optional[int] = Field(default=None, primary_key=True)
+    bracket_type: str = Field(index=True)  # "month" or "year"
+    year: int = Field(index=True)
+    month: Optional[int] = None
+    voter_target: int = Field(default=6)
+    status: str = Field(default="active", index=True)
+    champion_song_id: Optional[int] = None
+    created_by_user_id: int
+    created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+
+
+class BracketMatch(SQLModel, table=True):
+    id: Optional[int] = Field(default=None, primary_key=True)
+    tournament_id: int = Field(index=True)
+    round_number: int
+    matchup_number: int
+    song_a_id: Optional[int] = None
+    song_b_id: Optional[int] = None
+    winner_song_id: Optional[int] = None
+    status: str = Field(default="open", index=True)
+
+
+class BracketVote(SQLModel, table=True):
+    id: Optional[int] = Field(default=None, primary_key=True)
+    match_id: int = Field(index=True)
+    voter_id: int = Field(index=True)
+    song_id: int
+    created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+
+class BracketCreateRequest(BaseModel):
+    bracket_type: str  # "month" or "year"
+    year: int
+    month: Optional[int] = None
+
+
+class BracketTargetRequest(BaseModel):
+    voter_target: int
+
+
+class BracketVoteRequest(BaseModel):
+    song_id: int
 
 
 def get_session():
@@ -659,6 +718,192 @@ def get_daily_songs(
 
     return result
 
+@app.post("/api/songs/daily/{target_date}/tie-break")
+def select_daily_tie_break(
+    target_date: date,
+    request: DailyTieBreakRequest,
+    current_user: User = Depends(get_current_user),
+    session: Session = Depends(get_session)
+):
+    # Only designated admins can make tie-break decisions.
+    if current_user.username.casefold() not in _bracket_admin_usernames():
+        raise HTTPException(
+            status_code=403,
+            detail="Only admins can decide daily tie-breaks."
+        )
+
+    # Get all songs for this date.
+    songs = session.exec(
+        select(Song).where(
+            Song.submission_date == target_date
+        )
+    ).all()
+
+    if not songs:
+        raise HTTPException(
+            status_code=400,
+            detail="There are no songs for this date."
+        )
+
+    # Retrieve votes for these songs.
+    song_ids = [song.id for song in songs]
+
+    votes = session.exec(
+        select(Vote).where(
+            Vote.song_id.in_(song_ids)
+        )
+    ).all()
+
+    votes_by_song = {
+        song.id: []
+        for song in songs
+    }
+
+    for vote in votes:
+        votes_by_song[vote.song_id].append(vote)
+
+    # Calculate the same ranking criteria used by Daily.jsx.
+    ranked_songs = []
+
+    for song in songs:
+        song_votes = votes_by_song[song.id]
+
+        scores = [
+            vote.score
+            for vote in song_votes
+        ]
+
+        peer_scores = [
+            vote.score
+            for vote in song_votes
+            if vote.voter_id != song.submitter_id
+        ]
+
+        ranked_songs.append({
+            "song_id": song.id,
+            "average": sum(scores) / len(scores),
+            "peer_average": (
+                sum(peer_scores) / len(peer_scores)
+                if peer_scores
+                else None
+            ),
+            "stdev": (
+                statistics.stdev(scores)
+                if len(scores) > 1
+                else 0
+            )
+        })
+
+    # Compare rankings: overall average, peer average, then stdev.
+    def compare_rankings(a, b):
+        for key in ("average", "peer_average", "stdev"):
+            value_a = a[key]
+            value_b = b[key]
+
+            # A missing peer average ranks after a calculated one.
+            if key == "peer_average":
+                if value_a is None and value_b is not None:
+                    return 1
+                if value_b is None and value_a is not None:
+                    return -1
+                if value_a is None and value_b is None:
+                    continue
+
+            # Use a small tolerance for average comparisons.
+            if key in ("average", "peer_average"):
+                difference = value_a - value_b
+
+                if abs(difference) > 0.000001:
+                    return -1 if difference < 0 else 1
+
+                continue
+
+            if value_a < value_b:
+                return -1
+            if value_a > value_b:
+                return 1
+
+        return 0
+
+    ranked_songs.sort(
+        key=cmp_to_key(compare_rankings)
+    )
+
+    # Identify all songs tied for first place.
+    top_song = ranked_songs[0]
+
+    tied_song_ids = [
+        song["song_id"]
+        for song in ranked_songs
+        if compare_rankings(song, top_song) == 0
+    ]
+
+    if len(tied_song_ids) < 2:
+        raise HTTPException(
+            status_code=400,
+            detail="There is no tie for first place to break."
+        )
+
+    # The selected song must be one of the tied songs.
+    if request.winning_song_id not in tied_song_ids:
+        raise HTTPException(
+            status_code=400,
+            detail="You can only select a song tied for first place."
+        )
+
+    # Save the decision, or update an existing decision for this date.
+    existing_decision = session.exec(
+        select(DailyTieBreak).where(
+            DailyTieBreak.submission_date == target_date
+        )
+    ).first()
+
+    if existing_decision:
+        existing_decision.winning_song_id = request.winning_song_id
+        existing_decision.selected_by_user_id = current_user.id
+        existing_decision.selected_at = datetime.now(timezone.utc)
+        session.add(existing_decision)
+    else:
+        session.add(
+            DailyTieBreak(
+                submission_date=target_date,
+                winning_song_id=request.winning_song_id,
+                selected_by_user_id=current_user.id
+            )
+        )
+
+    session.commit()
+
+    return {
+        "status": "success",
+        "message": "Daily tie-break winner saved.",
+        "submission_date": target_date.isoformat(),
+        "winning_song_id": request.winning_song_id
+    }
+
+@app.get("/api/songs/daily/{target_date}/tie-break")
+def get_daily_tie_break(
+    target_date: date,
+    session: Session = Depends(get_session)
+):
+    decision = session.exec(
+        select(DailyTieBreak).where(
+            DailyTieBreak.submission_date == target_date
+        )
+    ).first()
+
+    if not decision:
+        return {
+            "winning_song_id": None
+        }
+
+    return {
+        "winning_song_id": decision.winning_song_id,
+        "selected_by_user_id": decision.selected_by_user_id,
+        "selected_at": decision.selected_at
+    }
+
+
 
 @app.get("/api/votes/me/{target_date}")
 def get_my_votes_for_date(
@@ -1161,7 +1406,7 @@ def get_global_stats(
     days: int = 28,
     session: Session = Depends(get_session)
 ):
-    users = session.exec(select(User)).all()
+    users = session.exec(select(User).order_by(User.id.asc())).all()
     songs = session.exec(select(Song)).all()
     votes = session.exec(select(Vote)).all()
 
@@ -1195,14 +1440,9 @@ def get_global_stats(
     }
 
     chart_data = []
+
     rank_counts = {
-        username: {
-            1: 0,
-            2: 0,
-            3: 0,
-            4: 0,
-            5: 0
-        }
+        username: {rank: 0 for rank in range(1, 9)}
         for username in usernames
     }
 
@@ -1222,7 +1462,7 @@ def get_global_stats(
         for song in songs_by_date[target]:
             song_votes = votes_by_song[song.id]
 
-            if len(song_votes) == len(users):
+            if song_votes:
                 scores = [vote.score for vote in song_votes]
                 avg = (
                     sum(scores) / len(scores)
@@ -1815,3 +2055,823 @@ def get_friday_theme_history(
             results.append(item)
 
     return results
+
+#--------------------- Bracket Definitions-----------------------------------
+
+def _bracket_admin_usernames():
+    # Set BRACKET_ADMIN_USERNAMES in Render to your account's username.
+    raw = os.getenv(
+        "BRACKET_ADMIN_USERNAMES",
+        os.getenv("THEME_WHEEL_SPINNERS", "wheel_admin")
+    )
+    return {
+        username.strip().casefold()
+        for username in raw.split(",")
+        if username.strip()
+    }
+
+
+def _require_bracket_admin(user):
+    if user.username.casefold() not in _bracket_admin_usernames():
+        raise HTTPException(
+            status_code=403,
+            detail="Only a bracket administrator can change bracket settings."
+        )
+
+
+def _get_daily_winners(session, year, month=None):
+    """
+    Get one winner per regular competition date.
+    This uses existing Song and Vote records; it does not duplicate songs.
+    """
+    if month is not None:
+        start = date(year, month, 1)
+        end = (
+            date(year + 1, 1, 1)
+            if month == 12
+            else date(year, month + 1, 1)
+        )
+    else:
+        start = date(year, 1, 1)
+        end = date(year + 1, 1, 1)
+
+    songs = session.exec(
+        select(Song).where(
+            Song.submission_date >= start,
+            Song.submission_date < end
+        )
+    ).all()
+
+    if not songs:
+        return []
+
+    song_ids = [song.id for song in songs]
+    votes = session.exec(
+        select(Vote).where(Vote.song_id.in_(song_ids))
+    ).all()
+
+    votes_by_song = {}
+    for vote in votes:
+        votes_by_song.setdefault(vote.song_id, []).append(vote.score)
+
+    songs_by_date = {}
+    for song in songs:
+        songs_by_date.setdefault(song.submission_date, []).append(song)
+
+    winners = []
+
+    for competition_date in sorted(songs_by_date):
+        ranked = []
+
+        for song in songs_by_date[competition_date]:
+            scores = votes_by_song.get(song.id, [])
+            # A song with no regular votes cannot be a daily winner.
+            if not scores:
+                continue
+
+            average = sum(scores) / len(scores)
+            stdev = statistics.stdev(scores) if len(scores) > 1 else 0
+
+            ranked.append({
+                "song": song,
+                "average": average,
+                "stdev": stdev,
+                "selection_date": competition_date,
+            })
+
+        if not ranked:
+            continue
+
+        # Match the existing daily-history rule: lowest average, then
+        # lowest standard deviation. Song ID makes any remaining tie stable.
+        ranked.sort(
+            key=lambda item: (
+                item["average"],
+                item["stdev"],
+                item["song"].id
+            )
+        )
+        winners.append(ranked[0])
+
+    # This order is also the final tie-breaker for bracket seeding.
+    # Stronger daily results are seeded first.
+    winners.sort(
+        key=lambda item: (
+            item["average"],
+            item["stdev"],
+            item["selection_date"],
+            item["song"].id
+        )
+    )
+    return winners
+
+
+def _create_bracket_round(session, tournament, song_ids, round_number):
+    """Create the seeded first round, preserving matchup positions."""
+    if not song_ids or round_number != 1:
+        return
+
+    bracket_size = 2
+    while bracket_size < len(song_ids):
+        bracket_size *= 2
+
+    # Standard seed order, for example:
+    # 4 slots: [1, 4, 2, 3]
+    # 8 slots: [1, 8, 4, 5, 2, 7, 3, 6]
+    seed_order = [1, 2]
+
+    while len(seed_order) < bracket_size:
+        next_size = len(seed_order) * 2
+        seed_order = [
+            value
+            for seed in seed_order
+            for value in (seed, next_size + 1 - seed)
+        ]
+
+    slots = [
+        song_ids[seed - 1] if seed <= len(song_ids) else None
+        for seed in seed_order
+    ]
+
+    for index in range(0, bracket_size, 2):
+        song_a_id = slots[index]
+        song_b_id = slots[index + 1]
+        matchup_number = index // 2 + 1
+
+        if song_a_id is None and song_b_id is None:
+            continue
+
+        if song_a_id is None or song_b_id is None:
+            # A bye advances automatically, without a vote.
+            advancing_song_id = song_a_id or song_b_id
+            match = BracketMatch(
+                tournament_id=tournament.id,
+                round_number=1,
+                matchup_number=matchup_number,
+                song_a_id=advancing_song_id,
+                song_b_id=None,
+                winner_song_id=advancing_song_id,
+                status="complete",
+            )
+        else:
+            match = BracketMatch(
+                tournament_id=tournament.id,
+                round_number=1,
+                matchup_number=matchup_number,
+                song_a_id=song_a_id,
+                song_b_id=song_b_id,
+                status="open",
+            )
+
+        session.add(match)
+
+    session.flush()
+
+
+def _create_future_bracket_rounds(session, tournament, entrant_count):
+    """Pre-create future matchups so winners can advance independently."""
+    bracket_size = 2
+    while bracket_size < entrant_count:
+        bracket_size *= 2
+
+    total_rounds = bracket_size.bit_length() - 1
+
+    for round_number in range(2, total_rounds + 1):
+        match_count = bracket_size // (2 ** round_number)
+
+        for matchup_number in range(1, match_count + 1):
+            session.add(
+                BracketMatch(
+                    tournament_id=tournament.id,
+                    round_number=round_number,
+                    matchup_number=matchup_number,
+                    song_a_id=None,
+                    song_b_id=None,
+                    status="pending",
+                )
+            )
+
+    session.flush()
+
+
+def _advance_bracket_if_ready(session, tournament):
+    """
+    Update future matchups independently as feeder matches complete.
+    Matches waiting for a winner remain pending and show TBD.
+    """
+    while tournament.status == "active":
+        matches = session.exec(
+            select(BracketMatch)
+            .where(BracketMatch.tournament_id == tournament.id)
+            .order_by(
+                BracketMatch.round_number,
+                BracketMatch.matchup_number,
+            )
+        ).all()
+
+        if not matches:
+            return
+
+        rounds = {}
+        for match in matches:
+            rounds.setdefault(match.round_number, {})[
+                match.matchup_number
+            ] = match
+
+        max_round = max(rounds)
+
+        # Fill each later round using its two feeder matchups.
+        for round_number in range(2, max_round + 1):
+            previous_round = rounds.get(round_number - 1, {})
+            current_round_matches = rounds.get(round_number, {})
+
+            for matchup_number, match in current_round_matches.items():
+                if match.status == "complete":
+                    continue
+
+                feeder_a = previous_round.get(
+                    matchup_number * 2 - 1
+                )
+                feeder_b = previous_round.get(
+                    matchup_number * 2
+                )
+
+                feeder_a_done = (
+                    feeder_a is not None
+                    and feeder_a.status == "complete"
+                )
+                feeder_b_done = (
+                    feeder_b is not None
+                    and feeder_b.status == "complete"
+                )
+
+                match.song_a_id = (
+                    feeder_a.winner_song_id if feeder_a_done else None
+                )
+                match.song_b_id = (
+                    feeder_b.winner_song_id if feeder_b_done else None
+                )
+
+                if not feeder_a_done or not feeder_b_done:
+                    match.status = "pending"
+                    match.winner_song_id = None
+
+                elif match.song_a_id is None and match.song_b_id is None:
+                    match.status = "pending"
+                    match.winner_song_id = None
+
+                elif match.song_a_id is None or match.song_b_id is None:
+                    # A bye in a future round also advances automatically.
+                    match.winner_song_id = (
+                        match.song_a_id or match.song_b_id
+                    )
+                    match.status = "complete"
+
+                else:
+                    match.winner_song_id = None
+                    match.status = "open"
+
+                session.add(match)
+
+        session.flush()
+
+        # Reload after updating the later-round slots.
+        matches = session.exec(
+            select(BracketMatch)
+            .where(BracketMatch.tournament_id == tournament.id)
+            .order_by(
+                BracketMatch.round_number,
+                BracketMatch.matchup_number,
+            )
+        ).all()
+
+        rounds = {}
+        for match in matches:
+            rounds.setdefault(match.round_number, {})[
+                match.matchup_number
+            ] = match
+
+        final_round_number = max(rounds)
+        final_matches = list(rounds[final_round_number].values())
+
+        # A single completed final matchup determines the champion.
+        if (
+            len(final_matches) == 1
+            and final_matches[0].status == "complete"
+            and final_matches[0].winner_song_id is not None
+        ):
+            tournament.champion_song_id = (
+                final_matches[0].winner_song_id
+            )
+            tournament.status = "complete"
+            session.add(tournament)
+            session.flush()
+            return
+
+        # Compatibility for an older tournament that doesn't yet have
+        # pre-created future rounds: create its next round as before.
+        latest_round_matches = list(rounds[final_round_number].values())
+
+        if any(
+            match.status != "complete"
+            for match in latest_round_matches
+        ):
+            return
+
+        winners = [
+            match.winner_song_id
+            for match in sorted(
+                latest_round_matches,
+                key=lambda item: item.matchup_number,
+            )
+            if match.winner_song_id is not None
+        ]
+
+        if len(winners) <= 1:
+            return
+
+        _create_bracket_round(
+            session,
+            tournament,
+            winners,
+            final_round_number + 1,
+        )
+        session.flush()
+
+
+def _resolve_match_if_ready(session, tournament, match):
+    """Complete a matchup as soon as either song reaches a majority."""
+
+    if match.status != "open":
+        return
+
+    if match.song_a_id is None or match.song_b_id is None:
+        return
+
+    votes = session.exec(
+        select(BracketVote).where(
+            BracketVote.match_id == match.id
+        )
+    ).all()
+
+    counts = {}
+    for vote in votes:
+        counts[vote.song_id] = counts.get(vote.song_id, 0) + 1
+
+    a_votes = counts.get(match.song_a_id, 0)
+    b_votes = counts.get(match.song_b_id, 0)
+
+    # A strict majority of the configured voter target wins immediately.
+    votes_needed_to_win = tournament.voter_target // 2 + 1
+
+    if a_votes >= votes_needed_to_win:
+        match.winner_song_id = match.song_a_id
+        match.status = "complete"
+        session.add(match)
+
+    elif b_votes >= votes_needed_to_win:
+        match.winner_song_id = match.song_b_id
+        match.status = "complete"
+        session.add(match)
+
+
+    
+#--------------Bracket Admin Controls------------------------------
+
+def _bracket_song_json(song_id, songs_by_id, users_by_id):
+    if song_id is None:
+        return None
+
+    song = songs_by_id.get(song_id)
+    if not song:
+        return None
+
+    submitter = users_by_id.get(song.submitter_id)
+
+    return {
+        "id": song.id,
+        "title": song.title,
+        "artist": song.artist,
+        "spotify_url": song.spotify_url,
+        "spotify_track_id": song.spotify_track_id,
+        "submitter_id": song.submitter_id,
+        "submittedBy": submitter.username if submitter else "Unknown",
+        "submission_date": (
+            song.submission_date.isoformat()
+            if song.submission_date
+            else None
+        ),
+    }
+
+
+def _bracket_json(session, tournament, current_user_id=None):
+    # Fetch all matches for this tournament in one query.
+    matches = session.exec(
+        select(BracketMatch)
+        .where(BracketMatch.tournament_id == tournament.id)
+        .order_by(
+            BracketMatch.round_number,
+            BracketMatch.matchup_number,
+        )
+    ).all()
+
+    # Fetch votes for every matchup in one query.
+    match_ids = [match.id for match in matches]
+
+    votes = []
+    if match_ids:
+        votes = session.exec(
+            select(BracketVote).where(
+                BracketVote.match_id.in_(match_ids)
+            )
+        ).all()
+
+    # Group votes by matchup in memory.
+    votes_by_match = {}
+    for vote in votes:
+        votes_by_match.setdefault(vote.match_id, []).append(vote)
+
+    # Collect every song ID needed for this tournament.
+    song_ids = {
+        song_id
+        for match in matches
+        for song_id in (match.song_a_id, match.song_b_id)
+        if song_id is not None
+    }
+
+    if tournament.champion_song_id is not None:
+        song_ids.add(tournament.champion_song_id)
+
+    # Fetch all songs in one query instead of looking each one up.
+    songs_by_id = {}
+    if song_ids:
+        songs = session.exec(
+            select(Song).where(Song.id.in_(song_ids))
+        ).all()
+        songs_by_id = {song.id: song for song in songs}
+
+    # Collect all users needed for voter lists and song submitters.
+    user_ids = {
+        vote.voter_id
+        for vote in votes
+    }
+
+    user_ids.update(
+        song.submitter_id
+        for song in songs_by_id.values()
+        if song.submitter_id is not None
+    )
+
+    # Fetch all relevant users in one query.
+    users_by_id = {}
+    if user_ids:
+        users = session.exec(
+            select(User).where(User.id.in_(user_ids))
+        ).all()
+        users_by_id = {user.id: user for user in users}
+
+    result_matches = []
+
+    for match in matches:
+        match_votes = votes_by_match.get(match.id, [])
+
+        current_user_vote_song_id = next(
+            (
+                vote.song_id
+                for vote in match_votes
+                if vote.voter_id == current_user_id
+            ),
+            None,
+        )
+
+        a_voters = []
+        b_voters = []
+
+        for vote in match_votes:
+            user = users_by_id.get(vote.voter_id)
+
+            voter_info = {
+                "user_id": vote.voter_id,
+                "username": user.username if user else "Unknown",
+            }
+
+            if vote.song_id == match.song_a_id:
+                a_voters.append(voter_info)
+            elif vote.song_id == match.song_b_id:
+                b_voters.append(voter_info)
+
+        result_matches.append({
+            "id": match.id,
+            "round_number": match.round_number,
+            "matchup_number": match.matchup_number,
+            "song_a": _bracket_song_json(
+                match.song_a_id, songs_by_id, users_by_id
+            ),
+            "song_b": _bracket_song_json(
+                match.song_b_id, songs_by_id, users_by_id
+            ),
+            "winner_song_id": match.winner_song_id,
+            "status": match.status,
+            "song_a_votes": len(a_voters),
+            "song_b_votes": len(b_voters),
+            "song_a_voters": a_voters,
+            "song_b_voters": b_voters,
+            "votes_cast": len(match_votes),
+            "current_user_vote_song_id": current_user_vote_song_id,
+        })
+
+    return {
+        "id": tournament.id,
+        "bracket_type": tournament.bracket_type,
+        "year": tournament.year,
+        "month": tournament.month,
+        "voter_target": tournament.voter_target,
+        "status": tournament.status,
+        "champion": _bracket_song_json(
+            tournament.champion_song_id,
+            songs_by_id,
+            users_by_id,
+        ),
+        "matches": result_matches,
+    }
+
+
+@app.get("/api/brackets")
+def list_brackets(
+    current_user: User = Depends(get_current_user),
+    session: Session = Depends(get_session),
+):
+    tournaments = session.exec(
+        select(BracketTournament).order_by(
+            BracketTournament.year.desc(),
+            BracketTournament.month.desc()
+        )
+    ).all()
+
+    return [
+        _bracket_json(session, tournament, current_user.id)
+        for tournament in tournaments
+    ]
+
+
+@app.post("/api/brackets")
+def create_bracket(
+    request: BracketCreateRequest,
+    current_user: User = Depends(get_current_user),
+    session: Session = Depends(get_session),
+):
+    _require_bracket_admin(current_user)
+
+    if request.bracket_type not in ("month", "year"):
+        raise HTTPException(
+            status_code=400,
+            detail="bracket_type must be 'month' or 'year'."
+        )
+
+    if request.bracket_type == "month":
+        if request.month is None or not 1 <= request.month <= 12:
+            raise HTTPException(
+                status_code=400,
+                detail="A valid month from 1 to 12 is required."
+            )
+    elif request.month is not None:
+        raise HTTPException(
+            status_code=400,
+            detail="A year bracket must not specify a month."
+        )
+
+    existing_query = select(BracketTournament).where(
+        BracketTournament.bracket_type == request.bracket_type,
+        BracketTournament.year == request.year,
+    )
+
+    if request.bracket_type == "month":
+        existing_query = existing_query.where(
+            BracketTournament.month == request.month
+        )
+    else:
+        existing_query = existing_query.where(
+            BracketTournament.month.is_(None)
+        )
+
+    if session.exec(existing_query).first():
+        raise HTTPException(
+            status_code=409,
+            detail="That bracket already exists."
+        )
+
+    # Both bracket types draw from regular daily competition winners.
+    # The annual bracket does NOT use Song of the Month bracket winners.
+    entrants = _get_daily_winners(
+        session,
+        request.year,
+        request.month if request.bracket_type == "month" else None
+    )
+
+    if not entrants:
+        raise HTTPException(
+            status_code=400,
+            detail="No regular daily competition winners with votes were found."
+        )
+
+    tournament = BracketTournament(
+        bracket_type=request.bracket_type,
+        year=request.year,
+        month=request.month if request.bracket_type == "month" else None,
+        voter_target=6,
+        created_by_user_id=current_user.id,
+    )
+    session.add(tournament)
+    session.commit()
+    session.refresh(tournament)
+
+    # Snapshot the entrants and preserve their seeded bracket positions.
+    song_ids = [item["song"].id for item in entrants]
+
+    _create_bracket_round(session, tournament, song_ids, 1)
+
+    # Create future rounds now, with TBD placeholders.
+    _create_future_bracket_rounds(
+        session,
+        tournament,
+        len(song_ids),
+    )
+
+    # Immediately populate any positions already determined by byes.
+    _advance_bracket_if_ready(session, tournament)
+
+    session.commit()
+    session.refresh(tournament)
+
+    return _bracket_json(session, tournament, current_user.id)
+
+@app.get("/api/brackets/permissions")
+def bracket_permissions(
+    current_user: User = Depends(get_current_user),
+):
+    return {
+        "is_admin": (
+            current_user.username.casefold()
+            in _bracket_admin_usernames()
+        )
+    }
+
+
+@app.get("/api/brackets/available-years")
+def bracket_available_years(
+    current_user: User = Depends(get_current_user),
+    session: Session = Depends(get_session),
+):
+    songs = session.exec(select(Song)).all()
+    years = sorted(
+        {song.submission_date.year for song in songs},
+        reverse=True
+    )
+    return {"years": years}
+
+
+@app.get("/api/brackets/{tournament_id}")
+def get_bracket(
+    tournament_id: int,
+    current_user: User = Depends(get_current_user),
+    session: Session = Depends(get_session),
+):
+    tournament = session.get(BracketTournament, tournament_id)
+    if not tournament:
+        raise HTTPException(status_code=404, detail="Bracket not found.")
+
+    return _bracket_json(session, tournament, current_user.id)
+
+
+@app.put("/api/brackets/{tournament_id}/voter-target")
+def update_bracket_voter_target(
+    tournament_id: int,
+    request: BracketTargetRequest,
+    current_user: User = Depends(get_current_user),
+    session: Session = Depends(get_session),
+):
+    _require_bracket_admin(current_user)
+
+    if not 1 <= request.voter_target <= 8:
+        raise HTTPException(
+            status_code=400,
+            detail="The voter target must be between 1 and 8."
+        )
+
+    tournament = session.get(BracketTournament, tournament_id)
+    if not tournament:
+        raise HTTPException(status_code=404, detail="Bracket not found.")
+
+    if tournament.status == "complete":
+        raise HTTPException(
+            status_code=400,
+            detail="A completed bracket's voter target cannot be changed."
+        )
+
+    tournament.voter_target = request.voter_target
+    session.add(tournament)
+
+    # Apply the new target to open matchups using votes already recorded.
+    matches = session.exec(
+        select(BracketMatch).where(
+            BracketMatch.tournament_id == tournament.id,
+            BracketMatch.status == "open",
+        )
+    ).all()
+
+    for match in matches:
+        _resolve_match_if_ready(session, tournament, match)
+
+    _advance_bracket_if_ready(session, tournament)
+    session.commit()
+    session.refresh(tournament)
+
+    return _bracket_json(session, tournament, current_user.id)
+
+
+@app.post("/api/brackets/{tournament_id}/matches/{match_id}/vote")
+def vote_in_bracket_match(
+    tournament_id: int,
+    match_id: int,
+    request: BracketVoteRequest,
+    current_user: User = Depends(get_current_user),
+    session: Session = Depends(get_session),
+):
+    tournament = session.get(BracketTournament, tournament_id)
+    match = session.get(BracketMatch, match_id)
+
+    if (
+        not tournament
+        or not match
+        or match.tournament_id != tournament.id
+    ):
+        raise HTTPException(
+            status_code=404,
+            detail="Matchup not found."
+        )
+
+    if tournament.status == "complete":
+        raise HTTPException(
+            status_code=400,
+            detail="This tournament is already complete."
+        )
+
+    if match.status == "complete":
+        raise HTTPException(
+            status_code=400,
+            detail="This matchup is already complete."
+        )
+
+    # Pending matchups with TBD opponents cannot accept votes.
+    if (
+        match.status != "open"
+        or match.song_a_id is None
+        or match.song_b_id is None
+    ):
+        raise HTTPException(
+            status_code=400,
+            detail="This matchup is not ready for voting yet."
+        )
+
+    if request.song_id not in (
+        match.song_a_id,
+        match.song_b_id,
+    ):
+        raise HTTPException(
+            status_code=400,
+            detail="You can only vote for one of the two songs in this matchup."
+        )
+
+    existing_vote = session.exec(
+        select(BracketVote).where(
+            BracketVote.match_id == match.id,
+            BracketVote.voter_id == current_user.id,
+        )
+    ).first()
+
+    if existing_vote:
+        # Allow a voter to change their vote while the matchup is open.
+        existing_vote.song_id = request.song_id
+        existing_vote.created_at = datetime.now(timezone.utc)
+        session.add(existing_vote)
+    else:
+        session.add(
+            BracketVote(
+                match_id=match.id,
+                voter_id=current_user.id,
+                song_id=request.song_id,
+            )
+        )
+
+    session.flush()
+
+    # Resolve only this matchup. Other open matchups stay open.
+    _resolve_match_if_ready(session, tournament, match)
+
+    # Update the bracket after this matchup changes.
+    _advance_bracket_if_ready(session, tournament)
+
+    session.commit()
+    session.refresh(tournament)
+
+    return _bracket_json(session, tournament, current_user.id)

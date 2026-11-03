@@ -24,6 +24,10 @@
   --border-radius-md: 12px;
   --border-radius-lg: 20px;
   --transition-speed: 0.3s ease;
+
+    /* Bracket song colors */
+  --bracket-song-opacity: 25%;
+  --bracket-winner-opacity: 35%;
 }
 
 /* Light Mode */
@@ -44,6 +48,10 @@
   --theme-button-border: #d3d3d0;
   --theme-button-hover: #eeeee3;
   --theme-glow: transparent;
+
+    /* Bracket song colors */
+  --bracket-song-opacity: 45%;
+  --bracket-winner-opacity: 55%;
 }
 
 /* Colorful Fun Mode */
@@ -64,6 +72,10 @@
   --theme-button-border: #e2bde9;
   --theme-button-hover: #fff0ff;
   --theme-glow: rgba(214, 60, 242, 0.16);
+
+   /* Bracket song colors */
+  --bracket-song-opacity: 40%;
+  --bracket-winner-opacity: 50%;
 }
 
 * {
