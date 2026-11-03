@@ -1,6 +1,7 @@
 import os
 import re
 import statistics
+from functools import cmp_to_key
 from datetime import datetime, date, timedelta, timezone
 from typing import Optional
 from zoneinfo import ZoneInfo
@@ -74,6 +75,16 @@ class Vote(SQLModel, table=True):
     voter_id: int
     score: int
 
+class DailyTieBreak(SQLModel, table=True):
+    id: Optional[int] = Field(default=None, primary_key=True)
+    submission_date: date = Field(index=True, unique=True)
+    winning_song_id: int
+    selected_by_user_id: int
+    selected_at: datetime = Field(
+        default_factory=lambda: datetime.now(timezone.utc)
+    )
+
+
 
 class SongCreate(BaseModel):
     title: str
@@ -93,6 +104,9 @@ class SongUpdate(BaseModel):
 class VoteCreate(BaseModel):
     song_id: int
     score: int
+
+class DailyTieBreakRequest(BaseModel):
+    winning_song_id: int
 
 
 class ProfileUpdate(BaseModel):
@@ -704,6 +718,192 @@ def get_daily_songs(
 
     return result
 
+@app.post("/api/songs/daily/{target_date}/tie-break")
+def select_daily_tie_break(
+    target_date: date,
+    request: DailyTieBreakRequest,
+    current_user: User = Depends(get_current_user),
+    session: Session = Depends(get_session)
+):
+    # Only designated admins can make tie-break decisions.
+    if current_user.username.casefold() not in _bracket_admin_usernames():
+        raise HTTPException(
+            status_code=403,
+            detail="Only admins can decide daily tie-breaks."
+        )
+
+    # Get all songs for this date.
+    songs = session.exec(
+        select(Song).where(
+            Song.submission_date == target_date
+        )
+    ).all()
+
+    if not songs:
+        raise HTTPException(
+            status_code=400,
+            detail="There are no songs for this date."
+        )
+
+    # Retrieve votes for these songs.
+    song_ids = [song.id for song in songs]
+
+    votes = session.exec(
+        select(Vote).where(
+            Vote.song_id.in_(song_ids)
+        )
+    ).all()
+
+    votes_by_song = {
+        song.id: []
+        for song in songs
+    }
+
+    for vote in votes:
+        votes_by_song[vote.song_id].append(vote)
+
+    # Calculate the same ranking criteria used by Daily.jsx.
+    ranked_songs = []
+
+    for song in songs:
+        song_votes = votes_by_song[song.id]
+
+        scores = [
+            vote.score
+            for vote in song_votes
+        ]
+
+        peer_scores = [
+            vote.score
+            for vote in song_votes
+            if vote.voter_id != song.submitter_id
+        ]
+
+        ranked_songs.append({
+            "song_id": song.id,
+            "average": sum(scores) / len(scores),
+            "peer_average": (
+                sum(peer_scores) / len(peer_scores)
+                if peer_scores
+                else None
+            ),
+            "stdev": (
+                statistics.stdev(scores)
+                if len(scores) > 1
+                else 0
+            )
+        })
+
+    # Compare rankings: overall average, peer average, then stdev.
+    def compare_rankings(a, b):
+        for key in ("average", "peer_average", "stdev"):
+            value_a = a[key]
+            value_b = b[key]
+
+            # A missing peer average ranks after a calculated one.
+            if key == "peer_average":
+                if value_a is None and value_b is not None:
+                    return 1
+                if value_b is None and value_a is not None:
+                    return -1
+                if value_a is None and value_b is None:
+                    continue
+
+            # Use a small tolerance for average comparisons.
+            if key in ("average", "peer_average"):
+                difference = value_a - value_b
+
+                if abs(difference) > 0.000001:
+                    return -1 if difference < 0 else 1
+
+                continue
+
+            if value_a < value_b:
+                return -1
+            if value_a > value_b:
+                return 1
+
+        return 0
+
+    ranked_songs.sort(
+        key=cmp_to_key(compare_rankings)
+    )
+
+    # Identify all songs tied for first place.
+    top_song = ranked_songs[0]
+
+    tied_song_ids = [
+        song["song_id"]
+        for song in ranked_songs
+        if compare_rankings(song, top_song) == 0
+    ]
+
+    if len(tied_song_ids) < 2:
+        raise HTTPException(
+            status_code=400,
+            detail="There is no tie for first place to break."
+        )
+
+    # The selected song must be one of the tied songs.
+    if request.winning_song_id not in tied_song_ids:
+        raise HTTPException(
+            status_code=400,
+            detail="You can only select a song tied for first place."
+        )
+
+    # Save the decision, or update an existing decision for this date.
+    existing_decision = session.exec(
+        select(DailyTieBreak).where(
+            DailyTieBreak.submission_date == target_date
+        )
+    ).first()
+
+    if existing_decision:
+        existing_decision.winning_song_id = request.winning_song_id
+        existing_decision.selected_by_user_id = current_user.id
+        existing_decision.selected_at = datetime.now(timezone.utc)
+        session.add(existing_decision)
+    else:
+        session.add(
+            DailyTieBreak(
+                submission_date=target_date,
+                winning_song_id=request.winning_song_id,
+                selected_by_user_id=current_user.id
+            )
+        )
+
+    session.commit()
+
+    return {
+        "status": "success",
+        "message": "Daily tie-break winner saved.",
+        "submission_date": target_date.isoformat(),
+        "winning_song_id": request.winning_song_id
+    }
+
+@app.get("/api/songs/daily/{target_date}/tie-break")
+def get_daily_tie_break(
+    target_date: date,
+    session: Session = Depends(get_session)
+):
+    decision = session.exec(
+        select(DailyTieBreak).where(
+            DailyTieBreak.submission_date == target_date
+        )
+    ).first()
+
+    if not decision:
+        return {
+            "winning_song_id": None
+        }
+
+    return {
+        "winning_song_id": decision.winning_song_id,
+        "selected_by_user_id": decision.selected_by_user_id,
+        "selected_at": decision.selected_at
+    }
+
+
 
 @app.get("/api/votes/me/{target_date}")
 def get_my_votes_for_date(
@@ -1206,7 +1406,7 @@ def get_global_stats(
     days: int = 28,
     session: Session = Depends(get_session)
 ):
-    users = session.exec(select(User)).all()
+    users = session.exec(select(User).order_by(User.id.asc())).all()
     songs = session.exec(select(Song)).all()
     votes = session.exec(select(Vote)).all()
 
@@ -1240,14 +1440,9 @@ def get_global_stats(
     }
 
     chart_data = []
+
     rank_counts = {
-        username: {
-            1: 0,
-            2: 0,
-            3: 0,
-            4: 0,
-            5: 0
-        }
+        username: {rank: 0 for rank in range(1, 9)}
         for username in usernames
     }
 
@@ -1267,7 +1462,7 @@ def get_global_stats(
         for song in songs_by_date[target]:
             song_votes = votes_by_song[song.id]
 
-            if len(song_votes) == len(users):
+            if song_votes:
                 scores = [vote.score for vote in song_votes]
                 avg = (
                     sum(scores) / len(scores)
@@ -2243,16 +2438,15 @@ def _resolve_match_if_ready(session, tournament, match):
     
 #--------------Bracket Admin Controls------------------------------
 
-def _bracket_song_json(session, song_id):
+def _bracket_song_json(song_id, songs_by_id, users_by_id):
     if song_id is None:
         return None
 
-    song = session.get(Song, song_id)
+    song = songs_by_id.get(song_id)
     if not song:
         return None
 
-    # Look up the user who submitted the song
-    submitter = session.get(User, song.submitter_id)
+    submitter = users_by_id.get(song.submitter_id)
 
     return {
         "id": song.id,
@@ -2269,27 +2463,82 @@ def _bracket_song_json(session, song_id):
         ),
     }
 
+
 def _bracket_json(session, tournament, current_user_id=None):
+    # Fetch all matches for this tournament in one query.
     matches = session.exec(
         select(BracketMatch)
         .where(BracketMatch.tournament_id == tournament.id)
         .order_by(
             BracketMatch.round_number,
-            BracketMatch.matchup_number
+            BracketMatch.matchup_number,
         )
     ).all()
+
+    # Fetch votes for every matchup in one query.
+    match_ids = [match.id for match in matches]
+
+    votes = []
+    if match_ids:
+        votes = session.exec(
+            select(BracketVote).where(
+                BracketVote.match_id.in_(match_ids)
+            )
+        ).all()
+
+    # Group votes by matchup in memory.
+    votes_by_match = {}
+    for vote in votes:
+        votes_by_match.setdefault(vote.match_id, []).append(vote)
+
+    # Collect every song ID needed for this tournament.
+    song_ids = {
+        song_id
+        for match in matches
+        for song_id in (match.song_a_id, match.song_b_id)
+        if song_id is not None
+    }
+
+    if tournament.champion_song_id is not None:
+        song_ids.add(tournament.champion_song_id)
+
+    # Fetch all songs in one query instead of looking each one up.
+    songs_by_id = {}
+    if song_ids:
+        songs = session.exec(
+            select(Song).where(Song.id.in_(song_ids))
+        ).all()
+        songs_by_id = {song.id: song for song in songs}
+
+    # Collect all users needed for voter lists and song submitters.
+    user_ids = {
+        vote.voter_id
+        for vote in votes
+    }
+
+    user_ids.update(
+        song.submitter_id
+        for song in songs_by_id.values()
+        if song.submitter_id is not None
+    )
+
+    # Fetch all relevant users in one query.
+    users_by_id = {}
+    if user_ids:
+        users = session.exec(
+            select(User).where(User.id.in_(user_ids))
+        ).all()
+        users_by_id = {user.id: user for user in users}
 
     result_matches = []
 
     for match in matches:
-        votes = session.exec(
-            select(BracketVote).where(BracketVote.match_id == match.id)
-        ).all()
+        match_votes = votes_by_match.get(match.id, [])
 
         current_user_vote_song_id = next(
             (
                 vote.song_id
-                for vote in votes
+                for vote in match_votes
                 if vote.voter_id == current_user_id
             ),
             None,
@@ -2298,8 +2547,9 @@ def _bracket_json(session, tournament, current_user_id=None):
         a_voters = []
         b_voters = []
 
-        for vote in votes:
-            user = session.get(User, vote.voter_id)
+        for vote in match_votes:
+            user = users_by_id.get(vote.voter_id)
+
             voter_info = {
                 "user_id": vote.voter_id,
                 "username": user.username if user else "Unknown",
@@ -2314,15 +2564,19 @@ def _bracket_json(session, tournament, current_user_id=None):
             "id": match.id,
             "round_number": match.round_number,
             "matchup_number": match.matchup_number,
-            "song_a": _bracket_song_json(session, match.song_a_id),
-            "song_b": _bracket_song_json(session, match.song_b_id),
+            "song_a": _bracket_song_json(
+                match.song_a_id, songs_by_id, users_by_id
+            ),
+            "song_b": _bracket_song_json(
+                match.song_b_id, songs_by_id, users_by_id
+            ),
             "winner_song_id": match.winner_song_id,
             "status": match.status,
             "song_a_votes": len(a_voters),
             "song_b_votes": len(b_voters),
             "song_a_voters": a_voters,
             "song_b_voters": b_voters,
-            "votes_cast": len(votes),
+            "votes_cast": len(match_votes),
             "current_user_vote_song_id": current_user_vote_song_id,
         })
 
@@ -2334,7 +2588,9 @@ def _bracket_json(session, tournament, current_user_id=None):
         "voter_target": tournament.voter_target,
         "status": tournament.status,
         "champion": _bracket_song_json(
-            session, tournament.champion_song_id
+            tournament.champion_song_id,
+            songs_by_id,
+            users_by_id,
         ),
         "matches": result_matches,
     }

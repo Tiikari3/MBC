@@ -47,7 +47,7 @@ const cardStyle = {
   padding: '1.1rem',
 };
 
-function ProposalCard({ proposal, onVote, onManuallyApprove, busy, canManuallyApprove, isUsed }) {
+function ProposalCard({ proposal, onVote, onManualApprove, busy, canManuallyApprove, isUsed }) {
   const decided =
     proposal.status === 'approved' || proposal.status === 'denied';
 
@@ -173,7 +173,7 @@ function ProposalCard({ proposal, onVote, onManuallyApprove, busy, canManuallyAp
             type="button"
             style={buttonStyle(false, busy)}
             disabled={busy}
-            onClick={() => onManuallyApprove(proposal)}
+            onClick={() => onManualApprove(proposal)}
           >
             {busy ? 'Approving…' : '✓ Manually approve'}
           </button>

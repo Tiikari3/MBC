@@ -98,12 +98,23 @@ export default function Brackets({ currentUser, onGoToLogin }) {
   }, [apiRequest]);
 
   useEffect(() => {
-    const refreshInterval = setInterval(() => {
-      // Refresh the data without showing the full-page loading state.
-      loadData({ silent: true });
-    }, 5000);
+    let cancelled = false;
+    let timeoutId;
 
-    return () => clearInterval(refreshInterval);
+    const refresh = async () => {
+      await loadData({ silent: true });
+
+      if (!cancelled) {
+        timeoutId = setTimeout(refresh, 60000);
+      }
+    };
+
+    timeoutId = setTimeout(refresh, 60000);
+
+    return () => {
+      cancelled = true;
+      clearTimeout(timeoutId);
+    };
   }, [loadData]);
 
   const selectedBracket = brackets.find((item) =>
@@ -244,8 +255,45 @@ export default function Brackets({ currentUser, onGoToLogin }) {
 
   const rounds = selectedBracket
     ? [...new Set(selectedBracket.matches.map((match) => match.round_number))]
-        .sort((a, b) => a - b)
+        .sort((a, b) => {
+          const aCount = selectedBracket.matches.filter(
+            (match) => match.round_number === a
+          ).length;
+
+          const bCount = selectedBracket.matches.filter(
+            (match) => match.round_number === b
+          ).length;
+
+          // Put the round with the most matchups first.
+          // The round with the fewest matchups will appear last.
+          return bCount - aCount || b - a;
+        })
     : [];
+
+  // Find the final matchup using the last displayed round.
+  const finalRoundNumber = rounds.length
+    ? rounds[rounds.length - 1]
+    : null;
+
+  const finalRoundMatches = selectedBracket
+    ? selectedBracket.matches.filter(
+        (match) => match.round_number === finalRoundNumber
+      )
+    : [];
+
+  const finalMatch = finalRoundMatches.length === 1
+    ? finalRoundMatches[0]
+    : null;
+
+  // Fall back to the final matchup's winner if the backend
+  // hasn't populated the tournament's champion field.
+  const derivedChampion = finalMatch?.winner_song_id != null
+    ? [finalMatch.song_a, finalMatch.song_b].find(
+        (song) => song?.id === finalMatch.winner_song_id
+      ) || null
+    : null;
+
+  const champion = selectedBracket?.champion || derivedChampion;
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
@@ -349,22 +397,38 @@ export default function Brackets({ currentUser, onGoToLogin }) {
                 : `Target: ${selectedBracket.voter_target} votes per matchup. Ties stay open for an additional vote.`}
             </p>
 
-            {selectedBracket.champion && (
+            {champion && (
               <div style={{
-                padding: '1rem',
+                padding: '1.2rem',
                 borderRadius: '10px',
-                background: 'var(--bg-secondary)',
-                border: '1px solid var(--accent-green)',
+                backgroundColor: `color-mix(
+                  in srgb,
+                  ${getUserColor(champion.submittedBy)}
+                  var(--bracket-winner-opacity),
+                  var(--bg-card)
+                )`,
+                border: `3px solid ${getUserColor(champion.submittedBy)}`,
               }}>
-                <strong>🏆 Champion</strong>
-                <div style={{ fontSize: '1.15rem', marginTop: '0.4rem' }}>
-                  {selectedBracket.champion.title} — {selectedBracket.champion.artist}
+                <div style={{
+                  fontSize: '1.1rem',
+                  fontWeight: 400,
+                  marginBottom: '0.5rem',
+                }}>
+                  🏆 Champion
+                </div>
+
+                <div style={{
+                  fontSize: '1.25rem',
+                  fontWeight: 400,
+                  color: 'var(--text-main)',
+                }}>
+                  {champion.title} — {champion.artist}
                 </div>
               </div>
             )}
           </section>
 
-          {rounds.map((roundNumber) => {
+          {rounds.map((roundNumber, roundIndex) => {
             const matches = selectedBracket.matches.filter((match) => {
               if (match.round_number !== roundNumber) {
                 return false;
@@ -386,7 +450,7 @@ export default function Brackets({ currentUser, onGoToLogin }) {
 
             return (
               <section key={roundNumber} style={cardStyle}>
-                <h3 style={{ marginTop: 0 }}>Round {roundNumber}</h3>
+                <h3 style={{ marginTop: 0 }}>Round {roundIndex + 1}</h3>
 
                 <div style={{ display: 'grid', gap: '1rem' }}>
                   {matches.map((match) => {
@@ -440,11 +504,17 @@ export default function Brackets({ currentUser, onGoToLogin }) {
                               <div key={songId || `bye-${index}`} style={{
                                 gridColumn: songColumn,
                                 gridRow: '1',
-                                border: `1px solid ${songColor}`,
+                                border: `${won ? 3 : 2}px solid ${songColor}`,
                                 borderRadius: '8px',
                                 padding: '0.8rem',
                                 minWidth: 0,
-                                backgroundColor: song ? `${songColor}33` : 'transparent',
+                                backgroundColor: song
+                                ? `color-mix(in srgb, ${songColor} ${
+                                    won
+                                      ? 'var(--bracket-winner-opacity)'
+                                      : 'var(--bracket-song-opacity)'
+                                  }, var(--bg-card))`
+                                : 'transparent',
                               }}>
                                 <div style={{ fontWeight: 800 }}>
                                   {song
